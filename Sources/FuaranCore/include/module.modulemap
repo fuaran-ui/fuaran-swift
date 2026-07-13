@@ -1,0 +1,4 @@
+module FuaranCore {
+    header "fuaran.h"
+    export *
+}

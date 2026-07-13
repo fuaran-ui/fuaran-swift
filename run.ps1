@@ -61,6 +61,26 @@ if ($IsWindows) {
     }
 }
 
+# ── Rust reference core staticlib (enables the C-ABI session leg) ──────────────
+# The FuaranSession actor + SessionTests link the Rust reference core's native
+# staticlib. Build it best-effort from the sibling repo; Package.swift then
+# auto-detects it at `../fuaran-rs/target/debug` (or an explicit
+# FUARAN_RS_STATICLIB_DIR). If it is absent, the session leg skips cleanly and
+# the pure-Swift render projection still builds + tests.
+if (-not $env:FUARAN_RS_STATICLIB_DIR) {
+    $rsDir = Join-Path $PSScriptRoot "..\fuaran-rs"
+    $cargo = Get-Command cargo -ErrorAction SilentlyContinue
+    if ((Test-Path $rsDir) -and $cargo) {
+        Write-Step "building the Rust reference core staticlib (cargo build in ../fuaran-rs)"
+        Push-Location $rsDir
+        try { & cargo build } catch { }
+        Pop-Location
+        if ($LASTEXITCODE -ne 0) {
+            Write-Skip "cargo build did not succeed in ../fuaran-rs; the C-ABI session leg will use any existing staticlib or skip."
+        }
+    }
+}
+
 # ── Build + test ──────────────────────────────────────────────────────────────
 if (-not $SkipBuild) {
     Write-Step "swift build"

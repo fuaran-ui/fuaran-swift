@@ -1,0 +1,15 @@
+# SwiftPM build output
+.build/
+.swiftpm/
+Package.resolved
+
+# XCFramework packaging output (regenerated from the Rust build legs; not source)
+packaging/
+*.xcframework
+
+# Vendored native staticlib copies (resolved at build time from the Rust host)
+Sources/FuaranCore/lib/
+
+# OS / editor
+.DS_Store
+*.swp

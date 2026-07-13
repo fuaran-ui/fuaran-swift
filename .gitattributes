@@ -1,0 +1,28 @@
+# Pin canonical text-file line endings to LF.
+#
+# `text=auto` lets git detect text vs. binary; `eol=lf` pins the
+# canonical in-repo line ending. On a Windows checkout, files stay LF
+# on disk (no autocrlf round-trip churn), eliminating the recurring
+# "LF will be replaced by CRLF the next time Git touches it" warnings
+# and phantom "modified" churn on tool-regenerated files.
+
+* text=auto eol=lf
+
+# Explicit binary types.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.svg   binary
+*.dll   binary
+*.lib   binary
+*.a     binary
+*.dylib binary
+*.so    binary
+*.exe   binary
+*.pdb   binary
+*.zip   binary
+*.tar   binary
+*.gz    binary
+*.xcframework binary

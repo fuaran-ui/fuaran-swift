@@ -130,7 +130,11 @@
     // ── Boundary helpers ───────────────────────────────────────────────────────
 
     private func writeSlot(
-      _ fn: (OpaquePointer?, UnsafePointer<UInt8>?, Int, UnsafePointer<UInt8>?, Int) -> FuaranBuf,
+      // `fn` is always an imported C function (`fuaran_session_set_*`) — it captures
+      // nothing and is inherently Sendable. Annotate it so Swift 6 region isolation
+      // accepts passing it into the `withUnsafeBufferPointer` closures below.
+      _ fn: @Sendable (OpaquePointer?, UnsafePointer<UInt8>?, Int, UnsafePointer<UInt8>?, Int) ->
+        FuaranBuf,
       key: String, value: String
     ) -> String {
       Array(key.utf8).withUnsafeBufferPointer { kp in

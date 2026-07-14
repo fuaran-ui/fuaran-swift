@@ -40,7 +40,7 @@
   /// `InteractiveFuaranTree`; the interactive control arms consult it and stay
   /// no-ops when it is absent.
   @MainActor
-  public protocol FuaranActionSink: AnyObject {
+  public protocol FuaranActionSink: AnyObject, Sendable {
     /// Dispatch a control `Action` through the session and re-project.
     func send(_ action: Action)
     /// Write a form-control edit through the `$state.<key>` channel.
@@ -59,8 +59,9 @@
   }
 
   /// The `$state.<key>` a binding writes to, or `nil` when the binding is not a
-  /// state slot.
-  public func stateKeyOf(_ binding: Binding?) -> String? {
+  /// state slot. Qualified as `FuaranUI.Binding` to disambiguate from
+  /// `SwiftUI.Binding`, both in scope here.
+  public func stateKeyOf(_ binding: FuaranUI.Binding?) -> String? {
     guard let binding, case .state(let key, _) = binding else { return nil }
     return key
   }

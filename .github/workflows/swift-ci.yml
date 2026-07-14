@@ -73,8 +73,28 @@ jobs:
   # staticlib. This job needs no sibling checkout, so it always runs.
   swift:
     runs-on: macos-15
+    env:
+      # Present ⇒ check out the wire-format-fixtures corpus so the render-coverage gate
+      # (RenderCoverageTests / CorpusTests) RUNS instead of skipping. Absent ⇒ degrades
+      # to the prior clean-skip, so this job stays green either way.
+      # Secret FUARAN_WORKSPACE_PAT — a fine-grained PAT with Contents: Read on
+      # fuaran-ui/workspace (where wire-format-fixtures lives).
+      HAS_WS_TOKEN: ${{ secrets.FUARAN_WORKSPACE_PAT != '' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Checkout wire-format-fixtures corpus (render-coverage gate)
+        if: env.HAS_WS_TOKEN == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: fuaran-ui/workspace
+          token: ${{ secrets.FUARAN_WORKSPACE_PAT }}
+          sparse-checkout: wire-format-fixtures
+          sparse-checkout-cone-mode: false
+          path: _workspace
+      - name: Place corpus where the tests look (<repo>/../wire-format-fixtures)
+        if: env.HAS_WS_TOKEN == 'true'
+        run: mv _workspace/wire-format-fixtures "$GITHUB_WORKSPACE/../wire-format-fixtures"
 
       - name: Select Xcode (Swift 6 toolchain — swift-tools 6.0 requires Xcode 16+)
         run: |
@@ -120,6 +140,9 @@ jobs:
     needs: gate
     if: needs.gate.outputs.has_core_token == 'true'
     runs-on: macos-15
+    env:
+      # See the `swift` job — present ⇒ the render-coverage gate runs; absent ⇒ skips.
+      HAS_WS_TOKEN: ${{ secrets.FUARAN_WORKSPACE_PAT != '' }}
     steps:
       - name: Checkout fuaran-swift
         uses: actions/checkout@v4
@@ -132,6 +155,19 @@ jobs:
           repository: fuaran-ui/fuaran-rs
           token: ${{ secrets.FUARAN_RS_PAT }}
           path: fuaran-rs
+
+      - name: Checkout wire-format-fixtures corpus (render-coverage gate)
+        if: env.HAS_WS_TOKEN == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: fuaran-ui/workspace
+          token: ${{ secrets.FUARAN_WORKSPACE_PAT }}
+          sparse-checkout: wire-format-fixtures
+          sparse-checkout-cone-mode: false
+          path: _workspace
+      - name: Place corpus as the fuaran-swift sibling (<repo>/../wire-format-fixtures)
+        if: env.HAS_WS_TOKEN == 'true'
+        run: mv _workspace/wire-format-fixtures "$GITHUB_WORKSPACE/wire-format-fixtures"
 
       - name: Select Xcode
         run: |

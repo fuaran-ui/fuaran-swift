@@ -1,0 +1,199 @@
+# macOS CI for fuaran-swift — the native Swift surface over the Rust reference core.
+#
+# Why macOS-only: Windows/Linux dev boxes have the Swift compiler + Foundation but NOT
+# SwiftUI (a closed Apple framework), so the SwiftUI renderer floor (Phase 540) and the
+# interaction driver (Phase 541) cannot build off an Apple platform. This workflow is the
+# Apple environment those phases need — GitHub-hosted macOS runners run on genuine Apple
+# hardware (license-compliant), so SwiftUI builds and renders here.
+#
+# It mirrors run.ps1's macOS happy path (swift build + swift test), plus two gated legs:
+#   • swift-core   — links the fuaran-rs reference-core staticlib so the C-ABI SessionTests
+#                    run instead of skipping (Phase 539).
+#   • xcframework  — assembles FuaranCore.xcframework from the Apple build legs
+#                    (mirrors `run.ps1 -Package`; macOS + xcodebuild only).
+#
+# COST NOTE: GitHub-hosted macOS runners bill at ~10x the Linux rate. Path filters keep
+# this off unrelated changes; the heavier cross-repo legs are gated on a sibling-checkout
+# secret and are no-ops until it is configured.
+#
+# SECRET REQUIRED for the core/xcframework legs: FUARAN_RS_PAT — a fine-grained PAT (or
+# GitHub App token) with `contents: read` on `fuaran-ui/fuaran-rs`, used to check out the
+# sibling reference core. Without it, the pure-Swift `swift` job still runs (it needs no
+# sibling); the core/xcframework jobs skip cleanly.
+
+name: swift-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Sources/**"
+      - "Tests/**"
+      - "Package.swift"
+      - ".github/workflows/swift-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "Sources/**"
+      - "Tests/**"
+      - "Package.swift"
+      - ".github/workflows/swift-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swift-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Gate ───────────────────────────────────────────────────────────────────────
+  # Secrets are not accessible in a job-level `if:`, so surface the token's presence as
+  # an output here (on a cheap Linux runner) and let the macOS jobs depend on it.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      has_core_token: ${{ steps.check.outputs.has_core_token }}
+    steps:
+      - id: check
+        env:
+          FUARAN_RS_PAT: ${{ secrets.FUARAN_RS_PAT }}
+        run: |
+          if [ -n "$FUARAN_RS_PAT" ]; then
+            echo "has_core_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_core_token=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── Primary: pure-Swift build + test on macOS ──────────────────────────────────
+  # Model + render-projection decoder + the SwiftUI renderer floor (Phase 540, once it
+  # lands). No Rust core: FUARAN_CORE_AVAILABLE stays undefined and SessionTests skip
+  # cleanly — the same clean-skip Package.swift performs on a non-Apple box without the
+  # staticlib. This job needs no sibling checkout, so it always runs.
+  swift:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode (Swift 6 toolchain — swift-tools 6.0 requires Xcode 16+)
+        run: |
+          latest=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -n "$latest" ]; then sudo xcode-select -s "$latest"; fi
+          swift --version
+          xcodebuild -version
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: swift build
+        run: swift build -v
+
+      - name: swift test
+        run: swift test -v
+        # The Phase 540 render-coverage checklist (every corpus node fixture renders
+        # through the floor with zero fallback-arm hits; per-kind coverage reported)
+        # runs here once it ships. SwiftUI snapshot tests render headlessly via
+        # ImageRenderer (macOS 13+). For an iOS-simulator render destination, see the
+        # optional xcodebuild leg documented below.
+
+  # ── Optional iOS-simulator render leg (documentation) ──────────────────────────
+  # `swift test` above exercises SwiftUI on the macOS host, which covers macOS-target
+  # views. If the Phase 540 floor also asserts iOS-specific rendering, add a scheme +
+  # xcodebuild destination (SPM packages expose an implicit scheme named after the
+  # package):
+  #
+  #   xcodebuild test \
+  #     -scheme fuaran-swift \
+  #     -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest'
+  #
+  # Left out of the active matrix to keep the default run to one macOS job.
+
+  # ── C-ABI session leg (Phase 539) ──────────────────────────────────────────────
+  # Build the fuaran-rs reference-core staticlib and point Package.swift at it, so the
+  # FuaranCore target links and SessionTests run instead of skipping.
+  swift-core:
+    needs: gate
+    if: needs.gate.outputs.has_core_token == 'true'
+    runs-on: macos-15
+    steps:
+      - name: Checkout fuaran-swift
+        uses: actions/checkout@v4
+        with:
+          path: fuaran-swift
+
+      - name: Checkout fuaran-rs (sibling reference core)
+        uses: actions/checkout@v4
+        with:
+          repository: fuaran-ui/fuaran-rs
+          token: ${{ secrets.FUARAN_RS_PAT }}
+          path: fuaran-rs
+
+      - name: Select Xcode
+        run: |
+          latest=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -n "$latest" ]; then sudo xcode-select -s "$latest"; fi
+          swift --version
+
+      - name: Cache cargo + Rust target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            fuaran-rs/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('fuaran-rs/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Build the Rust reference-core staticlib (host target)
+        working-directory: fuaran-rs
+        run: cargo build # → target/debug/libfuaran_rs.a (rustup is preinstalled on macOS runners)
+
+      - name: swift build + test with the C-ABI session leg
+        working-directory: fuaran-swift
+        env:
+          # Package.swift adds the FuaranCore target + FUARAN_CORE_AVAILABLE when it finds
+          # the staticlib at this path.
+          FUARAN_RS_STATICLIB_DIR: ${{ github.workspace }}/fuaran-rs/target/debug
+        run: |
+          swift build -v
+          swift test -v
+
+  # ── FuaranCore.xcframework packaging (Phase 539 reference packaging) ────────────
+  # macOS + xcodebuild only; mirrors `run.ps1 -Package`. Heavier (builds the Apple
+  # targets), so run it on demand via workflow_dispatch.
+  xcframework:
+    needs: gate
+    if: github.event_name == 'workflow_dispatch' && needs.gate.outputs.has_core_token == 'true'
+    runs-on: macos-15
+    steps:
+      - name: Checkout fuaran-swift
+        uses: actions/checkout@v4
+        with:
+          path: fuaran-swift
+
+      - name: Checkout fuaran-rs (sibling reference core)
+        uses: actions/checkout@v4
+        with:
+          repository: fuaran-ui/fuaran-rs
+          token: ${{ secrets.FUARAN_RS_PAT }}
+          path: fuaran-rs
+
+      - name: Select Xcode
+        run: |
+          latest=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -n "$latest" ]; then sudo xcode-select -s "$latest"; fi
+
+      - name: Add the Apple Rust targets
+        run: rustup target add aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim
+
+      - name: Assemble FuaranCore.xcframework
+        working-directory: fuaran-swift
+        # run.ps1 -Package builds the Apple staticlib legs and runs
+        # `xcodebuild -create-xcframework`; it skips cleanly if a leg is unavailable.
+        # PowerShell is preinstalled on GitHub-hosted macOS runners.
+        run: pwsh ./run.ps1 -Package

@@ -57,6 +57,18 @@ if coreAvailable {
 
 targets.append(
   .target(name: "FuaranUI", dependencies: fuaranUIDeps, swiftSettings: fuaranUISwiftSettings))
+
+// The SwiftUI renderer floor (Phase 540) + interaction / tone bridge (Phase 541).
+// Its SwiftUI code is guarded by `#if canImport(SwiftUI)`, so the target compiles
+// to nothing (the pure Coverage / BindingContext helpers aside) on a non-Apple box
+// and the reference macOS build renders for real.
+targets.append(
+  .target(name: "FuaranUIRenderer", dependencies: ["FuaranUI"]))
+targets.append(
+  .testTarget(
+    name: "FuaranUIRendererTests", dependencies: ["FuaranUI", "FuaranUIRenderer"],
+    swiftSettings: testSwiftSettings, linkerSettings: testLinkerSettings))
+
 targets.append(
   .testTarget(
     name: "FuaranUITests", dependencies: ["FuaranUI"],
@@ -64,8 +76,10 @@ targets.append(
 
 let package = Package(
   name: "fuaran-swift",
+  platforms: [.macOS(.v13), .iOS(.v16)],
   products: [
-    .library(name: "FuaranUI", targets: ["FuaranUI"])
+    .library(name: "FuaranUI", targets: ["FuaranUI"]),
+    .library(name: "FuaranUIRenderer", targets: ["FuaranUIRenderer"]),
   ],
   targets: targets
 )

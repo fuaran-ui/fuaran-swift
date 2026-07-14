@@ -26,46 +26,11 @@
   import FuaranUI
   import SwiftUI
 
-  // ── Tone tokens (Phase 540 light floor; the full light/dark tone bridge is
-  //    Phase 541's Theme.swift, which supersedes this section) ────────────────
-
-  /// A resolved tone swatch: a filled container, its readable foreground, and an
-  /// accent for emphasis.
-  struct ToneSwatch {
-    let container: Color
-    let onContainer: Color
-    let accent: Color
-  }
-
-  /// The light-scheme tone mapping (higher-luminance containers, dark
-  /// foregrounds). Phase 541 replaces this with a scheme-aware palette.
-  func toneSwatch(_ tone: ToneVariant) -> ToneSwatch {
-    switch tone {
-    case .default: return ToneSwatch(container: c(0.95, 0.95, 0.96), onContainer: c(0.11, 0.11, 0.12), accent: c(0.23, 0.23, 0.25))
-    case .subdued: return ToneSwatch(container: c(0.90, 0.90, 0.92), onContainer: c(0.35, 0.35, 0.38), accent: c(0.45, 0.45, 0.49))
-    case .brand: return ToneSwatch(container: c(0.86, 0.89, 1.0), onContainer: c(0.0, 0.10, 0.25), accent: c(0.18, 0.36, 0.82))
-    case .success: return ToneSwatch(container: c(0.83, 0.95, 0.85), onContainer: c(0.02, 0.21, 0.10), accent: c(0.12, 0.48, 0.27))
-    case .warning: return ToneSwatch(container: c(0.99, 0.91, 0.76), onContainer: c(0.24, 0.18, 0.0), accent: c(0.60, 0.42, 0.0))
-    case .critical: return ToneSwatch(container: c(0.99, 0.85, 0.84), onContainer: c(0.25, 0.0, 0.01), accent: c(0.73, 0.10, 0.10))
-    case .info: return ToneSwatch(container: c(0.81, 0.91, 0.96), onContainer: c(0.02, 0.19, 0.25), accent: c(0.05, 0.43, 0.58))
-    }
-  }
-
-  /// Map the badge-variant vocabulary onto the tone palette (Neutral → subdued).
-  func badgeSwatch(_ variant: BadgeVariant) -> ToneSwatch {
-    switch variant {
-    case .neutral: return toneSwatch(.subdued)
-    case .brand: return toneSwatch(.brand)
-    case .success: return toneSwatch(.success)
-    case .warning: return toneSwatch(.warning)
-    case .critical: return toneSwatch(.critical)
-    case .info: return toneSwatch(.info)
-    }
-  }
-
-  private func c(_ r: Double, _ g: Double, _ b: Double) -> Color {
-    Color(red: r, green: g, blue: b)
-  }
+  // The tone bridge (ToneSwatch / the light+dark FuaranTonePalette / FuaranTheme)
+  // lives in Theme.swift (Phase 541). Tone-bearing arms read the scheme-aware
+  // palette via @Environment(\.fuaranTones); interaction-bearing arms read the
+  // action sink via @Environment(\.fuaranActionSink) — both nil/light-default in
+  // the static floor, so the pure render path is unchanged.
 
   // ── Public entry — the exhaustive dispatch spine ──────────────────────────
 
@@ -388,10 +353,11 @@
   }
 
   private struct RenderMetric: View {
+    @Environment(\.fuaranTones) private var tones
     let k: MetricSpec
     let ctx: BindingContext
     var body: some View {
-      let accent = toneSwatch(k.tone).accent
+      let accent = tones.swatch(k.tone).accent
       VStack(alignment: .leading, spacing: 1) {
         Text(ctx.resolveText(k.label)).font(.caption).foregroundStyle(.secondary)
         Text(ctx.resolve(k.source)).font(.system(size: 22, weight: .bold)).foregroundStyle(accent)
@@ -403,10 +369,11 @@
   }
 
   private struct RenderBadge: View {
+    @Environment(\.fuaranTones) private var tones
     let k: BadgeSpec
     let ctx: BindingContext
     var body: some View {
-      let swatch = badgeSwatch(k.variant)
+      let swatch = tones.badge(k.variant)
       Text(ctx.resolveText(k.label))
         .font(.caption)
         .foregroundStyle(swatch.onContainer)
@@ -424,10 +391,11 @@
   }
 
   private struct RenderCallout: View {
+    @Environment(\.fuaranTones) private var tones
     let k: CalloutSpec
     let ctx: BindingContext
     var body: some View {
-      let swatch = toneSwatch(k.tone)
+      let swatch = tones.swatch(k.tone)
       VStack(alignment: .leading, spacing: 2) {
         if let heading = k.heading {
           Text(ctx.resolveText(heading)).font(.system(size: 14, weight: .bold)).foregroundStyle(swatch.onContainer)
@@ -514,10 +482,11 @@
   }
 
   private struct RenderToast: View {
+    @Environment(\.fuaranTones) private var tones
     let k: ToastSpec
     let ctx: BindingContext
     var body: some View {
-      let swatch = toneSwatch(k.tone)
+      let swatch = tones.swatch(k.tone)
       Text(ctx.resolveText(k.message))
         .foregroundStyle(swatch.onContainer)
         .padding(8)
@@ -581,12 +550,16 @@
     var body: some View {
       let label = ctx.resolveText(field.label) + (field.required ? " *" : "")
       switch field.kind {
-      case .text(let value, _), .number(let value, _), .choice(_, let value, _), .date(let value, _, _, _, _, _):
+      case .text(let value, _), .number(let value, _):
+        // Write-back (Phase 541): a state-backed field edit writes through the
+        // session's $state channel via the ambient action sink.
+        StatefulTextField(label: label, initial: ctx.resolve(value), stateKey: stateKeyOf(value))
+      case .choice(_, let value, _), .date(let value, _, _, _, _, _):
         labelled(label) { TextField("", text: .constant(ctx.resolve(value))).disabled(true) }
       case .textArea(_, let value, _):
         labelled(label) { TextField("", text: .constant(ctx.resolve(value)), axis: .vertical).disabled(true) }
       case .checkbox(let value, _):
-        Toggle(isOn: .constant(ctx.resolveBool(value))) { Text(label) }.disabled(true)
+        StatefulToggle(label: label, initial: ctx.resolveBool(value), stateKey: stateKeyOf(value))
       case .rangedNumber(let value, let minV, let maxV, _, _):
         let lo = minV ?? 0
         let hi = maxV ?? 100
@@ -622,11 +595,62 @@
     }
   }
 
+  /// A text/number field with local edit state that writes back through the
+  /// `$state.<key>` channel on change when the binding is a state slot and a live
+  /// action sink is present (Phase 541). Inert when the sink is nil (static floor).
+  private struct StatefulTextField: View {
+    @Environment(\.fuaranActionSink) private var sink
+    let label: String
+    let stateKey: String?
+    @State private var value: String
+
+    init(label: String, initial: String, stateKey: String?) {
+      self.label = label
+      self.stateKey = stateKey
+      _value = State(initialValue: initial)
+    }
+
+    var body: some View {
+      VStack(alignment: .leading, spacing: 1) {
+        Text(label).font(.caption).foregroundStyle(.secondary)
+        TextField("", text: $value)
+          .onChange(of: value) { newValue in
+            if let key = stateKey { sink?.writeState(stateKey: key, value: .string(newValue)) }
+          }
+      }
+    }
+  }
+
+  /// A checkbox with local state that writes back a boolean through the state
+  /// channel on toggle.
+  private struct StatefulToggle: View {
+    @Environment(\.fuaranActionSink) private var sink
+    let label: String
+    let stateKey: String?
+    @State private var on: Bool
+
+    init(label: String, initial: Bool, stateKey: String?) {
+      self.label = label
+      self.stateKey = stateKey
+      _on = State(initialValue: initial)
+    }
+
+    var body: some View {
+      Toggle(isOn: $on) { Text(label) }
+        .onChange(of: on) { newValue in
+          if let key = stateKey { sink?.writeState(stateKey: key, value: .bool(newValue)) }
+        }
+    }
+  }
+
   private struct RenderButton: View {
+    // Interaction round-trip (Phase 541): dispatch onClick through the live host
+    // when one is present; inert (the static-floor behaviour) when the sink is nil.
+    @Environment(\.fuaranActionSink) private var sink
     let k: ButtonSpec
     let ctx: BindingContext
     var body: some View {
-      Button(ctx.resolveText(k.label)) {}.disabled(ctx.resolveBool(k.disabled))
+      Button(ctx.resolveText(k.label)) { sink?.send(k.onClick) }.disabled(ctx.resolveBool(k.disabled))
     }
   }
 

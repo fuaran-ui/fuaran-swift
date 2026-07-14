@@ -69,6 +69,16 @@ targets.append(
     name: "FuaranUIRendererTests", dependencies: ["FuaranUI", "FuaranUIRenderer"],
     swiftSettings: testSwiftSettings, linkerSettings: testLinkerSettings))
 
+// The server-driven (SDUI) driver (Phase 541): transport seam + URLSession
+// reference impl + the fetch/apply/re-project loop. Foundation only (no SwiftUI);
+// written against the pure FuaranTreeSession seam, so it builds without the core.
+targets.append(
+  .target(name: "FuaranUIDriver", dependencies: ["FuaranUI"]))
+targets.append(
+  .testTarget(
+    name: "FuaranUIDriverTests", dependencies: ["FuaranUI", "FuaranUIDriver"],
+    swiftSettings: testSwiftSettings, linkerSettings: testLinkerSettings))
+
 targets.append(
   .testTarget(
     name: "FuaranUITests", dependencies: ["FuaranUI"],
@@ -80,6 +90,7 @@ let package = Package(
   products: [
     .library(name: "FuaranUI", targets: ["FuaranUI"]),
     .library(name: "FuaranUIRenderer", targets: ["FuaranUIRenderer"]),
+    .library(name: "FuaranUIDriver", targets: ["FuaranUIDriver"]),
   ],
   targets: targets
 )

@@ -187,4 +187,11 @@
     }
   }
 
+  /// Conform the live session to the transport-neutral `FuaranTreeSession` seam
+  /// the interaction host + server-driven driver (Phase 541) are written
+  /// against. The actor's isolated synchronous methods (`treeJSON` / `applyOp` /
+  /// `setState` / `setFilter` / `setQuery`) satisfy the `async` requirements by
+  /// construction — a cross-actor call to a synchronous actor method suspends.
+  extension FuaranSession: FuaranTreeSession {}
+
 #endif

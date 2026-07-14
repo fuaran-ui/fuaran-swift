@@ -39,7 +39,7 @@
 
   /// The light-scheme tone mapping (higher-luminance containers, dark
   /// foregrounds). Phase 541 replaces this with a scheme-aware palette.
-  func tone(_ tone: ToneVariant) -> ToneSwatch {
+  func toneSwatch(_ tone: ToneVariant) -> ToneSwatch {
     switch tone {
     case .default: return ToneSwatch(container: c(0.95, 0.95, 0.96), onContainer: c(0.11, 0.11, 0.12), accent: c(0.23, 0.23, 0.25))
     case .subdued: return ToneSwatch(container: c(0.90, 0.90, 0.92), onContainer: c(0.35, 0.35, 0.38), accent: c(0.45, 0.45, 0.49))
@@ -52,14 +52,14 @@
   }
 
   /// Map the badge-variant vocabulary onto the tone palette (Neutral → subdued).
-  func badge(_ variant: BadgeVariant) -> ToneSwatch {
+  func badgeSwatch(_ variant: BadgeVariant) -> ToneSwatch {
     switch variant {
-    case .neutral: return tone(.subdued)
-    case .brand: return tone(.brand)
-    case .success: return tone(.success)
-    case .warning: return tone(.warning)
-    case .critical: return tone(.critical)
-    case .info: return tone(.info)
+    case .neutral: return toneSwatch(.subdued)
+    case .brand: return toneSwatch(.brand)
+    case .success: return toneSwatch(.success)
+    case .warning: return toneSwatch(.warning)
+    case .critical: return toneSwatch(.critical)
+    case .info: return toneSwatch(.info)
     }
   }
 
@@ -391,7 +391,7 @@
     let k: MetricSpec
     let ctx: BindingContext
     var body: some View {
-      let accent = tone(k.tone).accent
+      let accent = toneSwatch(k.tone).accent
       VStack(alignment: .leading, spacing: 1) {
         Text(ctx.resolveText(k.label)).font(.caption).foregroundStyle(.secondary)
         Text(ctx.resolve(k.source)).font(.system(size: 22, weight: .bold)).foregroundStyle(accent)
@@ -406,7 +406,7 @@
     let k: BadgeSpec
     let ctx: BindingContext
     var body: some View {
-      let swatch = badge(k.variant)
+      let swatch = badgeSwatch(k.variant)
       Text(ctx.resolveText(k.label))
         .font(.caption)
         .foregroundStyle(swatch.onContainer)
@@ -427,7 +427,7 @@
     let k: CalloutSpec
     let ctx: BindingContext
     var body: some View {
-      let swatch = tone(k.tone)
+      let swatch = toneSwatch(k.tone)
       VStack(alignment: .leading, spacing: 2) {
         if let heading = k.heading {
           Text(ctx.resolveText(heading)).font(.system(size: 14, weight: .bold)).foregroundStyle(swatch.onContainer)
@@ -517,7 +517,7 @@
     let k: ToastSpec
     let ctx: BindingContext
     var body: some View {
-      let swatch = tone(k.tone)
+      let swatch = toneSwatch(k.tone)
       Text(ctx.resolveText(k.message))
         .foregroundStyle(swatch.onContainer)
         .padding(8)

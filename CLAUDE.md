@@ -6,10 +6,7 @@ truth + mutation via a C-ABI; the Swift side holds a **render projection** — a
 into native sealed types, held to a "decodes every corpus node fixture" bar, never a byte-parity bar
 (it never canonically encodes).
 
-This repo sits under the Fuaran-UI sub-estate at `../`, alongside the other reference-implementation
-tiers. Cross-repo conventions (the formatting mandate, the language-baseline pinning, the OSS
-publication boundary, Sync All, port allocation) live in the workspace `CLAUDE.md`
-(`../../../CLAUDE.md`) and the Fuaran-UI sub-estate `CLAUDE.md` (`../CLAUDE.md`). Read those first.
+This repo sits alongside the other Fuaran reference-implementation tiers. Cross-repo development conventions (port allocation, formatting, language-baseline pinning) live at the maintainers' workspace level and are not shipped here.
 
 ## Posture
 

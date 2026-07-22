@@ -11,6 +11,35 @@ values) for rendering. It never canonically *encodes*, so there is no byte-parit
 is that it decodes every node fixture in the shared conformance corpus into the sealed model with a
 compile-time-exhaustive `switch` — a new wire kind is a build error, never a silent fallback.
 
+## Get started
+
+Add the package and depend on the `FuaranUI` product:
+
+```swift
+.package(url: "https://github.com/fuaran-ui/fuaran-swift.git", from: "0.1.0"),
+// target dependency: .product(name: "FuaranUI", package: "fuaran-swift")
+```
+
+Decode a session's canonical tree JSON into the sealed model and `switch` over it —
+an unmodelled kind is a compile error:
+
+```swift
+import FuaranUI
+
+let root = try RenderProjection.decodeNode(json)
+guard case .box(let box) = root.kind else { return }   // box.role == .dashboard
+for child in box.children {
+    switch child.kind {
+    case .heading(let h): print(h.level, h.text)   // 2, .literal("Channel performance")
+    case .markdown(let m): print(m.text)
+    default: break
+    }
+}
+```
+
+Full walkthrough — decode → render projection → SwiftUI:
+<https://fuaran-ui.io/get-started/swift>.
+
 ## Layout
 
 ```

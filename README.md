@@ -40,11 +40,21 @@ the build is portable to a correctly-configured Swift-on-Windows toolchain.
 
 ## Status
 
-- **Sealed tree model + render-projection decoder** — the full current node vocabulary, certified by
-  a corpus render-coverage harness (every node fixture decodes into the sealed model, coverage
-  reported per kind).
-- **C-ABI session binding** (the `FuaranSession` Swift actor over the Rust core) and the SwiftUI
-  renderer are follow-on work.
+- **Sealed tree model + render-projection decoder** — the full current node vocabulary on the 0.2.x
+  canonical wire (bare-string literals, the `Metric`/`LabelValueRow` `value` rename, the `Fact`
+  kind, the unified filter chips over `FormFieldKind` incl. the dual-thumb `Range`,
+  omit-when-default stylistic fields, `Selection.defaultValue`/`.field`, keyed `DrawStyle.markId`,
+  and the lenient-ingest coercions — field/enum aliases, bare scalars in binding slots, schemaless
+  embedded frames, epoch timestamps, flat compute spellings). Certified by a corpus
+  render-coverage harness: every node fixture (node-round-trip + lenient-accept) decodes into the
+  sealed model, coverage reported per kind.
+- **C-ABI session binding** — the `FuaranSession` Swift actor over the Rust reference core's native
+  staticlib (or the `FuaranCore.xcframework` on Apple platforms); session tests drive
+  seed → apply-op → re-project end-to-end when the core is linked.
+- **SwiftUI renderer floor + interaction round-trip + server-driven driver** — the exhaustive
+  `FuaranNode` dispatch spine, the tone bridge, the `FuaranHost` interaction loop, and the
+  transport-agnostic driver (SwiftUI legs compile on Apple platforms; the pure layers build
+  everywhere).
 
 ## Licence
 

@@ -19,6 +19,12 @@
 
 import Foundation
 
+#if canImport(FoundationNetworking)
+  // On non-Darwin platforms the URL-loading system (URLSession /
+  // HTTPURLResponse) lives in the separate FoundationNetworking module.
+  import FoundationNetworking
+#endif
+
 /// A transport-layer failure (non-2xx, connection error, bad URL) — distinct
 /// from a session-layer validator reject.
 public struct TransportError: Error, Sendable {

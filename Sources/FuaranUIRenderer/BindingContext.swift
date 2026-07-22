@@ -38,8 +38,10 @@ public struct BindingContext: Sendable {
     case .state(let key, let defaultValue):
       return state[key].map(jsonScalar) ?? flatten(defaultValue)
     case .query: return ""
-    case .filter: return ""
-    case .selection: return ""
+    // A declared defaultValue is the render floor's static seed for the
+    // host-owned filter / selection stores (0.2.x).
+    case .filter(_, let defaultValue): return defaultValue.map(flatten) ?? ""
+    case .selection(_, let defaultValue, _): return defaultValue.map(flatten) ?? ""
     case .computed: return ""
     case .i18n(let key, _): return key
     case .local(_, let initialFrom): return resolve(initialFrom)
@@ -83,6 +85,7 @@ public struct BindingContext: Sendable {
     case .stringList(let xs): return xs.joined(separator: ", ")
     case .floatSeq(let ns): return ns.map(numberString).joined(separator: ", ")
     case .markers(let ms): return ms.map { resolveText($0.label) }.joined(separator: ", ")
+    case .floatPair(let a, let b): return "\(numberString(a)) – \(numberString(b))"
     }
   }
 }

@@ -184,11 +184,18 @@ public enum ColumnType: String, CaseIterable, Equatable, Sendable {
 
 public enum BinOp: String, CaseIterable, Equatable, Sendable {
   case add, sub, mul, div, mod, eq, ne, lt, le, gt, ge, and, or
+  // 0.2.x string predicates.
+  case contains
+  case startsWith = "startsWith"
+  case endsWith = "endsWith"
 }
 
 public enum ScalarFn: String, CaseIterable, Equatable, Sendable {
   case abs, round, floor, ceil, length, lower, upper, substr
   case datePart = "datePart"
+  // 0.2.x string/date scalar functions.
+  case concat, trim, replace
+  case dateDiffDays = "dateDiffDays"
 }
 
 public enum AggFn: String, CaseIterable, Equatable, Sendable {
@@ -204,7 +211,9 @@ public enum WindowFn: String, CaseIterable, Equatable, Sendable {
   case rank = "rank"
   case lag = "lag"
   case lead = "lead"
-  case cumSum = "cumSum"
+  // `cumulSum` is the canonical tag; the legacy `cumSum` spelling decodes as a
+  // lenient alias.
+  case cumulSum = "cumulSum"
   case rollingMean = "rollingMean"
 }
 

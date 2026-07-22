@@ -21,7 +21,9 @@ public struct MarkdownSpec: Equatable, Sendable {
 
 public struct MetricSpec: Equatable, Sendable {
   public var label: TextSource
-  public var source: Binding
+  /// 0.2.0 rename law — the scalar displayed value is `value` on the wire (the
+  /// retired `source` spelling is a hard error; the `data` alias is lenient).
+  public var value: Binding
   public var format: CellFormat
   public var tone: ToneVariant
   public var weight: StyleWeight
@@ -63,10 +65,23 @@ public struct SkeletonSpec: Equatable, Sendable {
 
 public struct LabelValueRowSpec: Equatable, Sendable {
   public var label: TextSource
-  public var source: Binding
+  /// 0.2.0 rename law — scalar displayed value ⇒ `value` (`data` alias kept).
+  public var value: Binding
   public var format: CellFormat
+  /// The behavioural bool (is this row emphasised?) — 0.2.2 omitted-when-false;
+  /// distinct from the `Emphasis` style enum.
   public var emphasis: Bool
   public var help: TextSource?
+}
+
+/// The labeled text-fact kind (0.2.x — `Fact`).
+public struct FactSpec: Equatable, Sendable {
+  public var label: TextSource
+  public var value: TextSource
+  public var emphasis: Bool
+  public var tone: ToneVariant
+  public var help: TextSource?
+  public var icon: String?
 }
 
 public struct LinkSpec: Equatable, Sendable {
@@ -131,10 +146,12 @@ public struct DrawStyle: Equatable, Sendable {
   public var fontSize: Double?
   public var emphasis: Emphasis?
   public var fontFamily: String?
+  /// Phase 642 — keyed mark identity (omitted-when-absent on the wire).
+  public var markId: String?
 
   public static let empty = DrawStyle(
     fill: nil, stroke: nil, strokeWidth: nil, opacity: nil,
-    textAnchor: nil, fontSize: nil, emphasis: nil, fontFamily: nil)
+    textAnchor: nil, fontSize: nil, emphasis: nil, fontFamily: nil, markId: nil)
 }
 
 public indirect enum CurveCommand: Equatable, Sendable {
@@ -173,6 +190,8 @@ public enum FormFieldKind: Equatable, Sendable {
   case number(value: Binding, onChange: Closure?)
   case checkbox(value: Binding, onToggle: Closure?)
   case choice(options: Binding, value: Binding, onChange: Closure?)
+  /// 0.2.0 — the dual-thumb numeric range (absorbed the retired RangeFilter).
+  case range(value: Binding, min: Double?, max: Double?, step: Double?, onChange: Closure?)
   case rangedNumber(
     value: Binding, min: Double?, max: Double?, step: Double?, onChange: Closure?)
   case segmentedChoice(
@@ -198,16 +217,11 @@ public struct FormSpec: Equatable, Sendable {
   public var disabled: Binding?
 }
 
-public enum FilterKind: Equatable, Sendable {
-  case textFilter(value: Binding, onChange: Closure?)
-  case choiceFilter(options: Binding, value: Binding, onChange: Closure?)
-  case rangeFilter(min: Double, max: Double, onChange: Closure?)
-  case segmentedFilter(
-    options: Binding, orientation: Orientation, value: Binding, onChange: Closure?)
-}
-
+/// 0.2.0 filters-unification: a chip's control is an ordinary `FormFieldKind`
+/// (the retired `*Filter` discriminators are hard errors); its absent `value`
+/// slot auto-binds `Filter(name)`.
 public struct FilterSpec: Equatable, Sendable {
-  public var kind: FilterKind
+  public var kind: FormFieldKind
   public var label: TextSource
   public var name: String
 }

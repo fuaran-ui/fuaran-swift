@@ -32,14 +32,19 @@ public enum StaticValue: Equatable, Sendable {
   case stringList([String])
   case floatSeq([Double])
   case markers([MapMarker])
+  /// The 0.2.0 `FormFieldKind.Range` dual-thumb `(min, max)` pair.
+  case floatPair(Double, Double)
 }
 
 /// A value binding (§3.3), one case per wire `$type`.
 public indirect enum Binding: Equatable, Sendable {
   case staticValue(StaticValue)
   case query(name: String, dependsOn: [String]?)
-  case filter(name: String)
-  case selection(nodeId: String)
+  /// 0.2.0 — optional `defaultValue` (the `State.defaultValue` convention).
+  case filter(name: String, defaultValue: StaticValue?)
+  /// 0.2.9 — optional `defaultValue`; 0.2.10 — optional `field` (the
+  /// declarative row-field projection).
+  case selection(nodeId: String, defaultValue: StaticValue?, field: String?)
   case state(key: String, defaultValue: StaticValue)
   case computed
   case i18n(key: String, args: [NamedBinding]?)
@@ -203,6 +208,11 @@ public indirect enum ColExpr: Equatable, Sendable {
   case caseExpr(cases: [CaseArm], elseExpr: ColExpr)
   case cast(columnType: ColumnType, expr: ColExpr)
   case apply(fn: ScalarFn, args: [ColExpr])
+  /// SQL three-valued membership over a literal list.
+  case inList(subject: ColExpr, items: [ColExpr])
+  /// Membership over a bound multi-select list param.
+  case inParam(subject: ColExpr, name: String)
+  case isNull(expr: ColExpr)
 }
 
 public struct CaseArm: Equatable, Sendable {

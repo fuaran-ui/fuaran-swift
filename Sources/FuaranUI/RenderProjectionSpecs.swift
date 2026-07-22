@@ -16,11 +16,14 @@ extension Decode {
     if let v = f["trendFormat"] { trendFormat = try cellFormat("\(path).trendFormat", v) }
     return MetricSpec(
       label: try reqTextSource(path, f, "label"),
-      source: try reqBinding(path, f, "source"),
-      format: try cellFormat("\(path).format", try req(path, f, "format")),
-      tone: try bareEnum("\(path).tone", try req(path, f, "tone"), "ToneVariant"),
-      weight: try bareEnum("\(path).weight", try req(path, f, "weight"), "StyleWeight"),
-      emphasis: try bareEnum("\(path).emphasis", try req(path, f, "emphasis"), "Emphasis"),
+      // 0.2.0 rename law — scalar displayed value ⇒ `value`; the retired
+      // `source` spelling is a hard error, the web-prior `data` alias remains.
+      value: try reqBindingAliased(path, f, "value", ["data"]),
+      // Phase 460 — the stylistic fields are omitted-when-default on the wire.
+      format: try optCellFormatDefault(path, f, "format"),
+      tone: try optToneDefault(path, f, "tone"),
+      weight: try optWeightDefault(path, f, "weight"),
+      emphasis: try optEmphasisDefault(path, f, "emphasis"),
       trend: try optBinding(path, f, "trend"),
       trendFormat: trendFormat,
       icon: try optString(path, f, "icon"),
@@ -32,17 +35,39 @@ extension Decode {
     return HeadingSpec(
       level: try reqInt(path, f, "level"),
       text: try reqTextSource(path, f, "text"),
-      variant: try bareEnum("\(path).variant", try req(path, f, "variant"), "HeadingVariant"))
+      variant: try headingVariant("\(path).variant", try req(path, f, "variant")))
   }
 
   static func labelValueRowSpec(_ path: String, _ j: JSON) throws -> LabelValueRowSpec {
     let f = try object(path, j)
+    // The `emphasis` here is the behavioural bool: 0.2.2 omitted-when-false,
+    // cross-vocab coerced when a model writes the enum spelling.
+    let emphasis: Bool
+    if let v = f["emphasis"] { emphasis = try emphasisFlag("\(path).emphasis", v) } else {
+      emphasis = false
+    }
     return LabelValueRowSpec(
       label: try reqTextSource(path, f, "label"),
-      source: try reqBinding(path, f, "source"),
-      format: try cellFormat("\(path).format", try req(path, f, "format")),
-      emphasis: try reqBool(path, f, "emphasis"),
+      // 0.2.0 rename law — scalar displayed value ⇒ `value` (`data` alias kept).
+      value: try reqBindingAliased(path, f, "value", ["data"]),
+      format: try optCellFormatDefault(path, f, "format"),
+      emphasis: emphasis,
       help: try optTextSource(path, f, "help"))
+  }
+
+  static func factSpec(_ path: String, _ j: JSON) throws -> FactSpec {
+    let f = try object(path, j)
+    let emphasis: Bool
+    if let v = f["emphasis"] { emphasis = try emphasisFlag("\(path).emphasis", v) } else {
+      emphasis = false
+    }
+    return FactSpec(
+      label: try reqTextSource(path, f, "label"),
+      value: try reqTextSource(path, f, "value"),
+      emphasis: emphasis,
+      tone: try optToneDefault(path, f, "tone"),
+      help: try optTextSource(path, f, "help"),
+      icon: try optString(path, f, "icon"))
   }
 
   static func markdownSpec(_ path: String, _ j: JSON) throws -> MarkdownSpec {
@@ -54,7 +79,7 @@ extension Decode {
     let f = try object(path, j)
     return BadgeSpec(
       label: try reqTextSource(path, f, "label"),
-      variant: try bareEnum("\(path).variant", try req(path, f, "variant"), "BadgeVariant"))
+      variant: try badgeVariant("\(path).variant", try req(path, f, "variant")))
   }
 
   static func linkSpec(_ path: String, _ j: JSON) throws -> LinkSpec {
@@ -86,9 +111,11 @@ extension Decode {
     let f = try object(path, j)
     return ToastSpec(
       message: try reqTextSource(path, f, "message"),
-      tone: try bareEnum("\(path).tone", try req(path, f, "tone"), "ToneVariant"),
+      tone: try optToneDefault(path, f, "tone"),
       open: try reqBinding(path, f, "open"),
-      dismissable: try reqBool(path, f, "dismissable"))
+      // 0.2.0 — omitted-when-TRUE (a toast is dismissable unless said
+      // otherwise; the one inverted default in §3.6's table).
+      dismissable: try optBool(path, f, "dismissable") ?? true)
   }
 
   static func codeBlockSpec(_ path: String, _ j: JSON) throws -> CodeBlockSpec {
@@ -112,7 +139,8 @@ extension Decode {
 
   static func sparklineSpec(_ path: String, _ j: JSON) throws -> SparklineSpec {
     let f = try object(path, j)
-    return SparklineSpec(source: try reqBindingSlot(path, f, "source", .floatSeq))
+    // Field alias: data → source.
+    return SparklineSpec(source: try reqBindingSlotAliased(path, f, "source", ["data"], .floatSeq))
   }
 
   static func skeletonSpec(_ path: String, _ j: JSON) throws -> SkeletonSpec {
@@ -124,9 +152,11 @@ extension Decode {
     let f = try object(path, j)
     return CalloutSpec(
       body: try reqTextSource(path, f, "body"),
-      dismissable: try reqBool(path, f, "dismissable"),
-      tone: try bareEnum("\(path).tone", try req(path, f, "tone"), "ToneVariant"),
-      heading: try optTextSource(path, f, "heading"),
+      // 0.2.0 — omitted-when-default (false).
+      dismissable: try optBool(path, f, "dismissable") ?? false,
+      tone: try optToneDefault(path, f, "tone"),
+      // Field alias: title → heading (Callout is in the scoped set).
+      heading: try optTextSourceAliased(path, f, "heading", ["title"]),
       icon: try optString(path, f, "icon"))
   }
 
@@ -134,8 +164,9 @@ extension Decode {
     let f = try object(path, j)
     return ProgressSpec(
       fraction: try reqBinding(path, f, "fraction"),
-      indeterminate: try reqBool(path, f, "indeterminate"),
-      tone: try bareEnum("\(path).tone", try req(path, f, "tone"), "ToneVariant"),
+      // 0.2.0 — omitted-when-default (false).
+      indeterminate: try optBool(path, f, "indeterminate") ?? false,
+      tone: try optToneDefault(path, f, "tone"),
       label: try optTextSource(path, f, "label"),
       caveat: try optTextSource(path, f, "caveat"))
   }
@@ -168,7 +199,7 @@ extension Decode {
     var textAnchor: TextAnchor? = nil
     if let v = f["textAnchor"] { textAnchor = try bareEnum("\(path).textAnchor", v, "TextAnchor") }
     var emphasis: Emphasis? = nil
-    if let v = f["emphasis"] { emphasis = try bareEnum("\(path).emphasis", v, "Emphasis") }
+    if let v = f["emphasis"] { emphasis = try emphasisEnum("\(path).emphasis", v) }
     return DrawStyle(
       fill: try optBinding(path, f, "fill"),
       stroke: try optBinding(path, f, "stroke"),
@@ -177,7 +208,9 @@ extension Decode {
       textAnchor: textAnchor,
       fontSize: try optFloat(path, f, "fontSize"),
       emphasis: emphasis,
-      fontFamily: try optString(path, f, "fontFamily"))
+      fontFamily: try optString(path, f, "fontFamily"),
+      // Phase 642 — keyed mark identity; omitted-when-None.
+      markId: try optString(path, f, "markId"))
   }
 
   static func styleOrDefault(_ path: String, _ f: [String: JSON]) throws -> DrawStyle {
@@ -257,52 +290,119 @@ extension Decode {
 
   // ── Input specs ────────────────────────────────────────────────────────────
 
-  static func formFieldKind(_ path: String, _ j: JSON) throws -> FormFieldKind {
+  /// Phase 596 — the auto-bind context for a control's ABSENT `value` slot. One
+  /// rule across the whole control vocabulary: every control may omit `value`;
+  /// a filter chip auto-binds `Filter(name)` (0.2.0) and a form field
+  /// auto-binds `State(field id)` with the slot's typed placeholder as the
+  /// State default (0.2.1).
+  enum ControlAutoBind {
+    case filterChip(String)
+    case formFieldId(String)
+
+    func autoBinding(_ placeholder: StaticValue) -> Binding {
+      switch self {
+      case .filterChip(let name): return .filter(name: name, defaultValue: nil)
+      case .formFieldId(let id): return .state(key: id, defaultValue: placeholder)
+      }
+    }
+  }
+
+  /// The typed placeholders for the 0.2.1 form-field auto-bind, pinned by the
+  /// reference implementations: empty string / `0` / `false` / null-choice /
+  /// `{min 0, max 0}` / ISO-empty date.
+  enum ControlValueDefaults {
+    static let text = StaticValue.ast(.string(""))
+    static let number = StaticValue.ast(.number(0))
+    static let checkbox = StaticValue.ast(.bool(false))
+    static let choice = StaticValue.stringOpt(nil)
+    static let range = StaticValue.floatPair(0.0, 0.0)
+    static let date = StaticValue.ast(.string(""))
+  }
+
+  static func formFieldKind(
+    _ autoBind: ControlAutoBind, _ path: String, _ j: JSON
+  ) throws -> FormFieldKind {
     let f = try object(path, j)
     let onChange = optClosure(f, "onChange")
     let onToggle = optClosure(f, "onToggle")
+    // Value slot: present ⇒ typed decode; absent ⇒ the context's auto-binding —
+    // Filter(name) on a chip, State(field id, typed placeholder) on a form
+    // field (Phase 596).
+    func valueOr(_ slot: StaticSlot, _ placeholder: StaticValue) throws -> Binding {
+      guard let v = f["value"] else { return autoBind.autoBinding(placeholder) }
+      return try bindingSlot("\(path).value", v, slot)
+    }
     switch try disc(path, f) {
-    case "Text": return .text(value: try reqBinding(path, f, "value"), onChange: onChange)
-    case "Number": return .number(value: try reqBinding(path, f, "value"), onChange: onChange)
+    case "Text":
+      return .text(value: try valueOr(.untyped, ControlValueDefaults.text), onChange: onChange)
+    case "Number":
+      return .number(value: try valueOr(.untyped, ControlValueDefaults.number), onChange: onChange)
     case "Checkbox":
-      return .checkbox(value: try reqBinding(path, f, "value"), onToggle: onToggle)
+      return .checkbox(
+        value: try valueOr(.untyped, ControlValueDefaults.checkbox), onToggle: onToggle)
     case "Choice":
       return .choice(
         options: try reqBindingSlot(path, f, "options", .options),
-        value: try reqBindingSlot(path, f, "value", .stringOpt), onChange: onChange)
+        value: try valueOr(.stringOpt, ControlValueDefaults.choice), onChange: onChange)
+    // 0.2.0 — the dual-thumb numeric range (absorbed the retired RangeFilter).
+    // The canonical Static pair rides as the BARE `{min, max}` object (no
+    // `$type`) — accept it before the generic binding dispatch.
+    case "Range":
+      let value: Binding
+      if case .object(let pf)? = f["value"], pf["$type"] == nil, pf["min"] != nil,
+        pf["max"] != nil
+      {
+        value = .staticValue(try StaticSlot.floatPair.parse("\(path).value", .object(pf)))
+      } else {
+        value = try valueOr(.floatPair, ControlValueDefaults.range)
+      }
+      return .range(
+        value: value, min: try optFloat(path, f, "min"), max: try optFloat(path, f, "max"),
+        step: try optFloat(path, f, "step"), onChange: onChange)
     case "RangedNumber":
       return .rangedNumber(
-        value: try reqBinding(path, f, "value"), min: try optFloat(path, f, "min"),
+        value: try valueOr(.untyped, ControlValueDefaults.number),
+        min: try optFloat(path, f, "min"),
         max: try optFloat(path, f, "max"), step: try optFloat(path, f, "step"),
         onChange: onChange)
     case "SegmentedChoice":
+      // Lenient omitted-when-default (§3.6): absent restores the language
+      // default `Horizontal` (decode-optional).
+      let orient: Orientation
+      if let v = f["orientation"] { orient = try orientation("\(path).orientation", v) } else {
+        orient = .horizontal
+      }
       return .segmentedChoice(
         options: try reqBindingSlot(path, f, "options", .options),
-        orientation: try bareEnum(
-          "\(path).orientation", try req(path, f, "orientation"), "Orientation"),
-        value: try reqBindingSlot(path, f, "value", .stringOpt), onChange: onChange)
+        orientation: orient,
+        value: try valueOr(.stringOpt, ControlValueDefaults.choice), onChange: onChange)
     case "TextArea":
       return .textArea(
-        rows: try reqInt(path, f, "rows"), value: try reqBinding(path, f, "value"),
+        rows: try reqInt(path, f, "rows"),
+        value: try valueOr(.untyped, ControlValueDefaults.text),
         onChange: onChange)
     case "Date":
       return .date(
-        value: try reqBinding(path, f, "value"),
+        value: try valueOr(.untyped, ControlValueDefaults.date),
         variant: try bareEnum("\(path).variant", try req(path, f, "variant"), "DateVariant"),
         min: try optString(path, f, "min"), max: try optString(path, f, "max"),
         step: try optFloat(path, f, "step"), onChange: onChange)
     case let o:
       throw unknownCase(
         path, o,
-        "Text | Number | Checkbox | Choice | RangedNumber | SegmentedChoice | TextArea | Date")
+        "Text | Number | Checkbox | Choice | Range | RangedNumber | SegmentedChoice | TextArea | Date"
+      )
     }
   }
 
   static func formField(_ path: String, _ j: JSON) throws -> FormField {
     let f = try object(path, j)
+    // Field alias: name → id. Id decodes first so the form context's auto-bind
+    // can use it (Phase 596).
+    let id = try reqStringAliased(path, f, "id", ["name"])
     return FormField(
-      id: try reqString(path, f, "id"),
-      kind: try formFieldKind("\(path).kind", try req(path, f, "kind")),
+      id: id,
+      kind: try formFieldKind(.formFieldId(id), "\(path).kind", try req(path, f, "kind")),
       label: try reqTextSource(path, f, "label"),
       required: try reqBool(path, f, "required"),
       help: try optTextSource(path, f, "help"))
@@ -319,41 +419,16 @@ extension Decode {
       disabled: try optBinding(path, f, "disabled"))
   }
 
-  static func filterKind(_ path: String, _ j: JSON) throws -> FilterKind {
-    let f = try object(path, j)
-    let onChange = optClosure(f, "onChange")
-    switch try disc(path, f) {
-    case "TextFilter":
-      return .textFilter(value: try reqBinding(path, f, "value"), onChange: onChange)
-    case "ChoiceFilter":
-      return .choiceFilter(
-        options: try reqBindingSlot(path, f, "options", .options),
-        value: try reqBindingSlot(path, f, "value", .stringOpt), onChange: onChange)
-    case "RangeFilter":
-      var mn = 0.0
-      var mx = 0.0
-      if case .object(let vf)? = f["value"], let minJ = vf["min"], let maxJ = vf["max"] {
-        mn = try float("\(path).value.min", minJ)
-        mx = try float("\(path).value.max", maxJ)
-      }
-      return .rangeFilter(min: mn, max: mx, onChange: onChange)
-    case "SegmentedFilter":
-      return .segmentedFilter(
-        options: try reqBindingSlot(path, f, "options", .options),
-        orientation: try bareEnum(
-          "\(path).orientation", try req(path, f, "orientation"), "Orientation"),
-        value: try reqBindingSlot(path, f, "value", .stringOpt), onChange: onChange)
-    case let o:
-      throw unknownCase(path, o, "TextFilter | ChoiceFilter | RangeFilter | SegmentedFilter")
-    }
-  }
-
   static func filterSpec(_ path: String, _ j: JSON) throws -> FilterSpec {
     let f = try object(path, j)
+    // 0.2.0 filters-unification: the chip's control is an ordinary
+    // FormFieldKind; its absent `value` auto-binds Filter(name). Name decodes
+    // first so the synthesis can use it.
+    let name = try reqString(path, f, "name")
     return FilterSpec(
-      kind: try filterKind("\(path).kind", try req(path, f, "kind")),
+      kind: try formFieldKind(.filterChip(name), "\(path).kind", try req(path, f, "kind")),
       label: try reqTextSource(path, f, "label"),
-      name: try reqString(path, f, "name"))
+      name: name)
   }
 
   static func buttonSpec(_ path: String, _ j: JSON) throws -> ButtonSpec {
@@ -361,7 +436,7 @@ extension Decode {
     return ButtonSpec(
       label: try reqTextSource(path, f, "label"),
       onClick: try reqAction(path, f, "onClick"),
-      variant: try bareEnum("\(path).variant", try req(path, f, "variant"), "ButtonVariant"),
+      variant: try buttonVariant("\(path).variant", try req(path, f, "variant")),
       icon: try optString(path, f, "icon"),
       disabled: try optBinding(path, f, "disabled"))
   }
@@ -372,7 +447,8 @@ extension Decode {
     if let v = f["values"] { values = try bindingSlot("\(path).values", v, .stringList) }
     return SelectSpec(
       label: try reqTextSource(path, f, "label"),
-      source: try reqBindingSlot(path, f, "source", .options),
+      // Field aliases: options / data → source.
+      source: try reqBindingSlotAliased(path, f, "source", ["options", "data"], .options),
       value: try reqBindingSlot(path, f, "value", .stringOpt),
       onChange: optClosure(f, "onChange"),
       placeholder: try optTextSource(path, f, "placeholder"),
@@ -425,11 +501,13 @@ extension Decode {
 
   static func columnErased(_ path: String, _ j: JSON) throws -> ColumnErased {
     let f = try object(path, j)
+    // Phase 460 — format/width omitted-when-default. Field aliases: type →
+    // kind, header/title → label.
     return ColumnErased(
-      format: try cellFormat("\(path).format", try req(path, f, "format")),
-      kind: try cellKindErased("\(path).kind", try req(path, f, "kind")),
-      label: try reqString(path, f, "label"),
-      width: try columnWidth("\(path).width", try req(path, f, "width")),
+      format: try optCellFormatDefault(path, f, "format"),
+      kind: try cellKindErased("\(path).kind", try reqAliased(path, f, "kind", ["type"])),
+      label: try reqStringAliased(path, f, "label", ["header", "title"]),
+      width: try optColumnWidthDefault(path, f, "width"),
       value: optClosure(f, "value"),
       field: try optString(path, f, "field"))
   }
@@ -454,8 +532,10 @@ extension Decode {
     if let v = f["staticRows"] { staticRowsV = try staticRows("\(path).staticRows", v) }
     return GridSpec(
       columns: columns,
-      editable: try reqBool(path, f, "editable"),
-      source: try reqBinding(path, f, "source"),
+      // 0.2.0 — omitted-when-default (false).
+      editable: try optBool(path, f, "editable") ?? false,
+      // Field aliases: data / rows → source.
+      source: try reqBindingAliased(path, f, "source", ["data", "rows"]),
       onRowClick: optClosure(f, "onRowClick"),
       rowKey: optClosure(f, "rowKey"),
       rowKeyField: try optString(path, f, "rowKeyField"),
@@ -468,7 +548,8 @@ extension Decode {
       .map { try string("\(path).yFields[\($0.0)]", $0.1) }
     return ChartSpec(
       kind: try bareEnum("\(path).kind", try req(path, f, "kind"), "ChartKind"),
-      source: try reqBinding(path, f, "source"),
+      // Field alias: data → source.
+      source: try reqBindingAliased(path, f, "source", ["data"]),
       stacked: (try optBool(path, f, "stacked")) ?? false,
       xField: try reqString(path, f, "xField"),
       yFields: yFields,
@@ -481,7 +562,8 @@ extension Decode {
     return MapSpec(
       centreLatitude: try reqFloat(path, f, "centreLatitude"),
       centreLongitude: try reqFloat(path, f, "centreLongitude"),
-      source: try reqBindingSlot(path, f, "source", .markers),
+      // Field aliases: data / markers → source.
+      source: try reqBindingSlotAliased(path, f, "source", ["data", "markers"], .markers),
       zoom: try reqInt(path, f, "zoom"),
       onMarkerClick: optClosure(f, "onMarkerClick"))
   }
@@ -498,13 +580,19 @@ extension Decode {
     switch try disc(path, f) {
     case "Flex":
       return .flex(
-        direction: try bareEnum(
-          "\(path).direction", try req(path, f, "direction"), "Orientation"),
+        direction: try orientation("\(path).direction", try req(path, f, "direction")),
         gap: try optInt(path, f, "gap"), wrap: try reqBool(path, f, "wrap"))
     case "Grid":
+      // Field alias: columns → cols. Lenient (§3.6): absent `cols` with no
+      // `templateColumns` reads as `Auto`; absent `cols` WITH a template reads
+      // `cols: 1` (the template carries the real shape).
+      let colsJ = getAliased(f, "cols", ["columns"])
+      let templateColumns = try optString(path, f, "templateColumns")
+      if colsJ == nil, templateColumns == nil { return .auto }
+      let cols: Int
+      if let v = colsJ { cols = try int("\(path).cols", v) } else { cols = 1 }
       return .grid(
-        cols: try reqInt(path, f, "cols"), gap: try optInt(path, f, "gap"),
-        templateColumns: try optString(path, f, "templateColumns"))
+        cols: cols, gap: try optInt(path, f, "gap"), templateColumns: templateColumns)
     case "Auto": return .auto
     case let o: throw unknownCase(path, o, "Flex | Grid | Auto")
     }
@@ -518,7 +606,8 @@ extension Decode {
     }
     return BoxSpec(
       children: try children(path, f),
-      heading: try optTextSource(path, f, "heading"),
+      // Field alias: title → heading (Box is in the scoped set).
+      heading: try optTextSourceAliased(path, f, "heading", ["title"]),
       layout: try boxLayout("\(path).layout", try req(path, f, "layout")),
       role: role)
   }
@@ -530,8 +619,8 @@ extension Decode {
 
   static func legacyStack(_ path: String, _ j: JSON) throws -> BoxSpec {
     let f = try object(path, j)
-    let direction: Orientation = try bareEnum(
-      "\(path).orientation", try req(path, f, "orientation"), "Orientation")
+    let direction: Orientation = try orientation(
+      "\(path).orientation", try req(path, f, "orientation"))
     return BoxSpec(
       children: try children(path, f), heading: nil,
       layout: .flex(direction: direction, gap: nil, wrap: try reqBool(path, f, "wrap")),
@@ -586,10 +675,14 @@ extension Decode {
     } else {
       activeIndex = .staticValue(.ast(.number(0)))
     }
+    // 0.2.0 — omitted-when-default (Horizontal), encoder-symmetric.
+    let orient: Orientation
+    if let v = f["orientation"] { orient = try orientation("\(path).orientation", v) } else {
+      orient = .horizontal
+    }
     return TabsSpec(
       children: try children(path, f),
-      orientation: try bareEnum(
-        "\(path).orientation", try req(path, f, "orientation"), "Orientation"),
+      orientation: orient,
       activeIndex: activeIndex,
       onSelect: optClosure(f, "onSelect"),
       tabHeaders: tabHeaders,
@@ -607,7 +700,9 @@ extension Decode {
   static func summaryListSpec(_ path: String, _ j: JSON) throws -> SummaryListSpec {
     let f = try object(path, j)
     return SummaryListSpec(
-      children: try children(path, f), heading: try optTextSource(path, f, "heading"))
+      children: try children(path, f),
+      // Field alias: title → heading.
+      heading: try optTextSourceAliased(path, f, "heading", ["title"]))
   }
 
   static func disclosureSpec(_ path: String, _ j: JSON) throws -> DisclosureSpec {
@@ -615,7 +710,8 @@ extension Decode {
     return DisclosureSpec(
       children: try children(path, f),
       defaultOpen: try reqBool(path, f, "defaultOpen"),
-      heading: try reqTextSource(path, f, "heading"),
+      // Field alias: title → heading.
+      heading: try reqTextSourceAliased(path, f, "heading", ["title"]),
       open: try reqBinding(path, f, "open"),
       onToggle: optClosure(f, "onToggle"))
   }
@@ -629,7 +725,8 @@ extension Decode {
       dismissable: try reqBool(path, f, "dismissable"),
       open: try reqBinding(path, f, "open"),
       onDismiss: onDismiss,
-      heading: try optTextSource(path, f, "heading"))
+      // Field alias: title → heading.
+      heading: try optTextSourceAliased(path, f, "heading", ["title"]))
   }
 
   static func scrollAreaSpec(_ path: String, _ j: JSON) throws -> ScrollAreaSpec {
@@ -765,6 +862,7 @@ extension Decode {
     case "Callout": return .callout(try calloutSpec(path, j))
     case "Progress": return .progress(try progressSpec(path, j))
     case "Skeleton": return .skeleton(try skeletonSpec(path, j))
+    case "Fact": return .fact(try factSpec(path, j))
     case "LabelValueRow": return .labelValueRow(try labelValueRowSpec(path, j))
     case "Link": return .link(try linkSpec(path, j))
     case "Image": return .image(try imageSpec(path, j))
@@ -885,10 +983,11 @@ extension Decode {
       try f["role"].map { try bareEnum("\(path).role", $0, "StyleRole") } ?? .none
     let voice: FontVoice =
       try f["voice"].map { try bareEnum("\(path).voice", $0, "FontVoice") } ?? .default
+    // Phase 460 — tone/weight/emphasis omitted-when-default (as role/voice).
     return SemanticStyle(
-      emphasis: try bareEnum("\(path).emphasis", try req(path, f, "emphasis"), "Emphasis"),
-      tone: try bareEnum("\(path).tone", try req(path, f, "tone"), "ToneVariant"),
-      weight: try bareEnum("\(path).weight", try req(path, f, "weight"), "StyleWeight"),
+      emphasis: try optEmphasisDefault(path, f, "emphasis"),
+      tone: try optToneDefault(path, f, "tone"),
+      weight: try optWeightDefault(path, f, "weight"),
       role: role, voice: voice)
   }
 

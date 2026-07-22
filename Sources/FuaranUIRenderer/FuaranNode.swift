@@ -74,6 +74,7 @@
     case .callout(let k): return AnyView(RenderCallout(k: k, ctx: ctx))
     case .progress(let k): return AnyView(RenderProgress(k: k, ctx: ctx))
     case .skeleton(let k): return AnyView(RenderSkeleton(rows: k.rows))
+    case .fact(let k): return AnyView(RenderFact(k: k, ctx: ctx))
     case .labelValueRow(let k): return AnyView(RenderLabelValueRow(k: k, ctx: ctx))
     case .link(let k): return AnyView(RenderLink(k: k, ctx: ctx))
     case .image(let k): return AnyView(RenderImage(k: k, ctx: ctx))
@@ -360,7 +361,7 @@
       let accent = tones.swatch(k.tone).accent
       VStack(alignment: .leading, spacing: 1) {
         Text(ctx.resolveText(k.label)).font(.caption).foregroundStyle(.secondary)
-        Text(ctx.resolve(k.source)).font(.system(size: 22, weight: .bold)).foregroundStyle(accent)
+        Text(ctx.resolve(k.value)).font(.system(size: 22, weight: .bold)).foregroundStyle(accent)
         if let subtext = k.subtext { Text(ctx.resolveText(subtext)).font(.caption2).foregroundStyle(.secondary) }
         if let trend = k.trend { Text(ctx.resolve(trend)).font(.caption2) }
       }
@@ -441,7 +442,23 @@
       HStack {
         Text(ctx.resolveText(k.label)).foregroundStyle(.secondary)
         Spacer()
-        Text(ctx.resolve(k.source)).font(.system(size: 13, weight: k.emphasis ? .bold : .regular))
+        Text(ctx.resolve(k.value)).font(.system(size: 13, weight: k.emphasis ? .bold : .regular))
+      }
+    }
+  }
+
+  private struct RenderFact: View {
+    @Environment(\.fuaranTones) private var tones
+    let k: FactSpec
+    let ctx: BindingContext
+    var body: some View {
+      let accent = tones.swatch(k.tone).accent
+      HStack {
+        Text(ctx.resolveText(k.label)).foregroundStyle(.secondary)
+        Spacer()
+        Text(ctx.resolveText(k.value))
+          .font(.system(size: 13, weight: k.emphasis ? .bold : .regular))
+          .foregroundStyle(accent)
       }
     }
   }
@@ -560,6 +577,15 @@
         labelled(label) { TextField("", text: .constant(ctx.resolve(value)), axis: .vertical).disabled(true) }
       case .checkbox(let value, _):
         StatefulToggle(label: label, initial: ctx.resolveBool(value), stateKey: stateKeyOf(value))
+      case .range(let value, let minV, let maxV, _, _):
+        // 0.2.0 dual-thumb range — render floor shows the resolved pair over
+        // its bounds; live thumbs are host work.
+        let lo = minV ?? 0
+        let hi = maxV ?? 100
+        VStack(alignment: .leading, spacing: 1) {
+          Text("\(label): \(ctx.resolve(value))").font(.caption)
+          Slider(value: .constant(lo), in: lo...max(hi, lo + 1)).disabled(true)
+        }
       case .rangedNumber(let value, let minV, let maxV, _, _):
         let lo = minV ?? 0
         let hi = maxV ?? 100
@@ -754,7 +780,7 @@
     case .mount(let k): return slotTrees(k.inputs)
     // Leaf / non-child-bearing kinds.
     case .heading, .markdown, .metric, .badge, .sparkline, .callout, .progress, .skeleton,
-      .labelValueRow, .link, .image, .list, .toast, .codeBlock, .math, .drawing,
+      .fact, .labelValueRow, .link, .image, .list, .toast, .codeBlock, .math, .drawing,
       .form, .filters, .button, .fileUpload, .select, .dataGrid, .chart, .map, .custom:
       return []
     }

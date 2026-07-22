@@ -22,6 +22,16 @@ public protocol FuaranTreeSession: Sendable {
   /// The session's current tree, re-encoded to canonical wire JSON.
   func treeJSON() async -> String
 
+  /// The session's current tree as a **resolved projection** — `treeJSON` with
+  /// every scalar-slot `Binding.Transform` folded to the value it evaluates to
+  /// (Phase 650). This is the read the *render* path uses, so a decode-only
+  /// surface renders resolved compute values. A conformer with no evaluator (an
+  /// in-memory fake, or a tree that carries no Transform) returns `treeJSON()`.
+  /// A hard requirement (not an extension default): an async default would
+  /// out-resolve the live `FuaranSession` actor's synchronous override at a
+  /// concrete call site, silently returning the raw tree.
+  func projectResolved() async -> String
+
   /// Apply a canonical wire `TreeOp` JSON; throws on a decode or validator
   /// reject (the held tree is untouched on failure).
   func applyOp(_ opJSON: String) async throws

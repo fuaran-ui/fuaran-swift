@@ -86,8 +86,11 @@
     }
 
     /// Seed a host from a live session by reading + projecting its current tree.
+    /// The render tree is the **resolved projection** (Phase 650), so a scalar
+    /// `Transform` renders its evaluated value; the core resolves it and the
+    /// decode-only surface renders what it decodes.
     public static func start(session: any FuaranTreeSession) async throws -> FuaranHost {
-      let tree = try RenderProjection.decodeNode(await session.treeJSON())
+      let tree = try RenderProjection.decodeNode(await session.projectResolved())
       return FuaranHost(session: session, tree: tree)
     }
 
@@ -146,7 +149,9 @@
     }
 
     private func reproject() async throws {
-      tree = try RenderProjection.decodeNode(await session.treeJSON())
+      // Re-read the RESOLVED projection so a state / filter / selection write
+      // that feeds a scalar `Transform` param re-evaluates it (Phase 650).
+      tree = try RenderProjection.decodeNode(await session.projectResolved())
     }
 
     private func guarded(_ block: () async throws -> Void) async {

@@ -26,6 +26,8 @@
     private var current: String
     init(initial: String) { self.current = initial }
     func treeJSON() -> String { current }
+    // No native evaluator: the projection is the raw tree (Phase 650).
+    func projectResolved() -> String { current }
     func applyOp(_ opJSON: String) throws { current = opJSON }
     func setState(key: String, valueJSON: String) throws {}
     func setFilter(name: String, valueJSON: String) throws {}

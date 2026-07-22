@@ -114,6 +114,7 @@ import XCTest
     init(_ initial: String) { self.current = initial }
 
     func treeJSON() -> String { current }
+    func projectResolved() -> String { current }
 
     func applyOp(_ opJSON: String) throws {
       if opJSON.contains("__reject__") { throw InteractionReject(code: "VALIDATION_REJECT") }

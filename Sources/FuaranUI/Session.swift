@@ -92,6 +92,16 @@
       FuaranSession.consume(fuaran_session_tree_json(handle))
     }
 
+    /// The session's current tree as a **resolved projection** (Phase 650):
+    /// identical to `treeJSON` except every scalar-slot `Binding.Transform` is
+    /// folded to the literal / `Static` number it evaluates to against the live
+    /// sources. The decode-only render projection cannot itself evaluate a
+    /// `Transform`, so this is what the render path decodes — the Rust core
+    /// resolves compute values, the Swift surface stays decode-only.
+    public func projectResolved() -> String {
+      FuaranSession.consume(fuaran_session_project_resolved(handle))
+    }
+
     /// Render the session's current tree to a body-fragment HTML string.
     public func render() -> String {
       FuaranSession.consume(fuaran_session_render(handle))

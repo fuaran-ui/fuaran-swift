@@ -77,6 +77,32 @@ final class SessionTests: XCTestCase {
       XCTAssertTrue(html.contains("Hello"), "rendered HTML should contain the heading text")
     }
 
+    // A Badge whose label is a scalar Transform (count of a 2-row embedded
+    // frame). The decode-only surface cannot evaluate the Transform itself — the
+    // core's resolved projection (Phase 650) folds it to the literal "2".
+    private let scalarTransformTree = #"""
+      {"id":"root","kind":{"$type":"Box","children":[{"id":"count-badge","kind":{"$type":"Badge","label":{"$type":"Bound","binding":{"$type":"Transform","pipeline":[{"$type":"groupBy","aggs":[{"fn":"count","name":"n","of":"id"}],"keys":[]}],"source":{"columns":{"id":{"values":["A","B"]}},"schema":[{"name":"id","type":"string"}]}}},"variant":"Neutral"}}],"layout":{"$type":"Auto"},"role":"Group"}}
+      """#
+
+    /// projectResolved folds a scalar-slot Transform to the literal it evaluates
+    /// to; the raw treeJSON still carries the unresolved Transform (additive).
+    func testProjectResolvedFoldsScalarTransform() async throws {
+      let session = try FuaranSession(treeJSON: scalarTransformTree)
+
+      let raw = await session.treeJSON()
+      XCTAssertTrue(
+        raw.contains(#""$type":"Transform""#),
+        "treeJSON keeps the raw Transform (the resolved projection is additive)")
+
+      let projected = try RenderProjection.decodeNode(await session.projectResolved())
+      guard case .box(let box) = projected.kind, let badge = box.children.first,
+        case .badge(let spec) = badge.kind
+      else { return XCTFail("expected a Box > Badge projection") }
+      XCTAssertEqual(
+        spec.label, .literal("2"),
+        "the Badge label Transform must fold to the literal count 2")
+    }
+
   #else
 
     func testSessionLegSkipsWhenCoreAbsent() throws {

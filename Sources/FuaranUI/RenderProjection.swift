@@ -517,7 +517,11 @@ extension Decode {
     let f = try object(path, j)
     switch try disc(path, f) {
     case "Static":
-      let v = try req(path, f, "value")
+      // Phase 677 — absence is structural: a MISSING `value` means the binding
+      // carries none. The legacy `"value": null` spelling still decodes (§16
+      // shorthand) by routing to the very same per-slot parse, so the two
+      // spellings cannot disagree.
+      let v = f["value"] ?? .null
       return .staticValue(try slot.parse("\(path).value", v))
     case "Query":
       let name = try reqString(path, f, "name")
@@ -545,11 +549,11 @@ extension Decode {
       let key = try reqString(path, f, "key")
       let dv: StaticValue
       // Field aliases: initialValue / default → defaultValue.
-      if let v = getAliased(f, "defaultValue", ["initialValue", "default"]) {
-        dv = (try? slot.parse("\(path).defaultValue", v)) ?? slot.placeholder()
-      } else {
-        dv = slot.placeholder()
-      }
+      // Phase 677 — an ABSENT default decodes exactly as the legacy
+      // `"defaultValue": null` did, so the omitted canonical form and the
+      // legacy spelling project identically.
+      let rawDefault = getAliased(f, "defaultValue", ["initialValue", "default"]) ?? .null
+      dv = (try? slot.parse("\(path).defaultValue", rawDefault)) ?? slot.placeholder()
       return .state(key: key, defaultValue: dv)
     case "Computed": return .computed
     case "I18n":

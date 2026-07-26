@@ -1,6 +1,6 @@
 # fuaran-swift
 
-The **native Swift surface** of the [Fuaran UI wire format](../fuaran/docs/WIRE_FORMAT.md) — a
+The **native Swift surface** of the [Fuaran UI wire format](../fuaran-dotnet/docs/WIRE_FORMAT.md) — a
 render/authoring surface over the Rust reference core. Apache-2.0.
 
 `fuaran-swift` is **not** a standalone conformant host. The Rust reference core owns truth and

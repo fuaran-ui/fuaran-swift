@@ -69,7 +69,7 @@ bootstrap (not yet wired into `run.ps1`); when adopted it maps the workspace for
 
 ## Wire format
 
-The canonical wire format is owned by the F# tier (`../fuaran/docs/WIRE_FORMAT.md`) with the
+The canonical wire format is owned by the F# tier (`../fuaran-dotnet/docs/WIRE_FORMAT.md`) with the
 workspace-level `../wire-format-fixtures/` corpus as the executable conformance suite. `fuaran-swift`
 is a **decode-only render projection** of that format: `RenderProjection.decodeNode` parses a
 canonical `Node` document into the sealed Swift model. The **forward-coupling rule** (`WIRE_FORMAT.md`

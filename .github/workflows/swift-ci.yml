@@ -83,18 +83,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The corpus became its OWN public repo on 2026-07-27
+      # (fuaran-ui/fuaran-ui-specification). It had been a tracked folder inside
+      # fuaran-ui/workspace, and this step still sparse-checked-out that path —
+      # which since the split matches nothing, so the corpus never arrived and
+      # the placement `mv` failed with "No such file or directory". Every run
+      # since died there, BEFORE `swift build`, and it went unnoticed because the
+      # path filters mean only a Sources/Tests/Package.swift push runs this
+      # workflow at all. Checking the corpus out directly needs neither a sparse
+      # path nor the PAT — the repo is public.
       - name: Checkout wire-format-fixtures corpus (render-coverage gate)
-        if: env.HAS_WS_TOKEN == 'true'
         uses: actions/checkout@v4
         with:
-          repository: fuaran-ui/workspace
-          token: ${{ secrets.FUARAN_WORKSPACE_PAT }}
-          sparse-checkout: wire-format-fixtures
-          sparse-checkout-cone-mode: false
-          path: _workspace
+          repository: fuaran-ui/fuaran-ui-specification
+          path: _corpus
       - name: Place corpus where the tests look (<repo>/../wire-format-fixtures)
-        if: env.HAS_WS_TOKEN == 'true'
-        run: mv _workspace/wire-format-fixtures "$GITHUB_WORKSPACE/../wire-format-fixtures"
+        run: mv _corpus "$GITHUB_WORKSPACE/../wire-format-fixtures"
 
       - name: Select Xcode (Swift 6 toolchain — swift-tools 6.0 requires Xcode 16+)
         run: |
@@ -156,18 +160,14 @@ jobs:
           token: ${{ secrets.FUARAN_RS_PAT }}
           path: fuaran-rs
 
+      # Same 2026-07-27 corpus-repo split as the `swift` job above.
       - name: Checkout wire-format-fixtures corpus (render-coverage gate)
-        if: env.HAS_WS_TOKEN == 'true'
         uses: actions/checkout@v4
         with:
-          repository: fuaran-ui/workspace
-          token: ${{ secrets.FUARAN_WORKSPACE_PAT }}
-          sparse-checkout: wire-format-fixtures
-          sparse-checkout-cone-mode: false
-          path: _workspace
+          repository: fuaran-ui/fuaran-ui-specification
+          path: _corpus
       - name: Place corpus as the fuaran-swift sibling (<repo>/../wire-format-fixtures)
-        if: env.HAS_WS_TOKEN == 'true'
-        run: mv _workspace/wire-format-fixtures "$GITHUB_WORKSPACE/wire-format-fixtures"
+        run: mv _corpus "$GITHUB_WORKSPACE/wire-format-fixtures"
 
       - name: Select Xcode
         run: |

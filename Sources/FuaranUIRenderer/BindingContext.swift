@@ -86,6 +86,9 @@ public struct BindingContext: Sendable {
     case .floatSeq(let ns): return ns.map(numberString).joined(separator: ", ")
     case .markers(let ms): return ms.map { resolveText($0.label) }.joined(separator: ", ")
     case .floatPair(let a, let b): return "\(numberString(a)) – \(numberString(b))"
+    // 0.7.0 — the DateRange ISO pair. Same en-dash join as the numeric pair; the
+    // ends are already ISO-8601 display strings, so no formatting is owed.
+    case .stringPair(let from, let to): return "\(from) – \(to)"
     }
   }
 }

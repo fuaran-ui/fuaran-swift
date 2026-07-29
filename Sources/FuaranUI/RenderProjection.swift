@@ -324,6 +324,8 @@ enum StaticSlot {
   case untyped, options, stringOpt, stringList, floatSeq, markers
   /// The 0.2.0 `FormFieldKind.Range` dual-thumb `(min, max)` pair.
   case floatPair
+  /// The 0.7.0 `FormFieldKind.DateRange` ordered `(from, to)` ISO-8601 pair.
+  case stringPair
 
   func placeholder() -> StaticValue {
     switch self {
@@ -335,6 +337,7 @@ enum StaticSlot {
     case .floatSeq: return .floatSeq([])
     case .markers: return .markers([])
     case .floatPair: return .floatPair(0.0, 0.0)
+    case .stringPair: return .stringPair("", "")
     }
   }
 
@@ -397,6 +400,38 @@ enum StaticSlot {
           try Decode.float("\(path)[0]", items[0]), try Decode.float("\(path)[1]", items[1]))
       default:
         throw Decode.wrongType(path, "range pair ({min, max} object or [min, max] array)")
+      }
+    case .stringPair:
+      // Didactic domain rule: a LITERAL pair must be ordered. Same-variant
+      // ISO-8601 strings sort lexicographically in chronological order, so
+      // Swift's `>` on String — which compares Unicode scalar values — is an
+      // ordinal compare, total for every variant with no date parsing and no
+      // locale. Only a literal pair is checked; a bound pair's ordering is a
+      // runtime concern.
+      func ordered(_ from: String, _ to: String) throws -> StaticValue {
+        if from > to {
+          throw Decode.err(
+            .wrongType, path,
+            "date-range start '\(from)' is after end '\(to)' — a DateRange pair is ordered "
+              + "(from <= to); ISO-8601 strings of one variant compare lexicographically, "
+              + "so swap the two values")
+        }
+        return .stringPair(from, to)
+      }
+      switch v {
+      // Canonical: the bare `{from, to}` object; lenient: a two-element
+      // `[from, to]` array (§3.6 coercion).
+      case .object(let pf):
+        guard let fromJ = pf["from"], let toJ = pf["to"] else {
+          throw Decode.wrongType(path, "object with from and to ISO-8601 strings")
+        }
+        return try ordered(
+          try Decode.string("\(path).from", fromJ), try Decode.string("\(path).to", toJ))
+      case .array(let items) where items.count == 2:
+        return try ordered(
+          try Decode.string("\(path)[0]", items[0]), try Decode.string("\(path)[1]", items[1]))
+      default:
+        throw Decode.wrongType(path, "date-range pair ({from, to} object or [from, to] array)")
       }
     }
   }

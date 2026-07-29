@@ -200,6 +200,14 @@ public enum FormFieldKind: Equatable, Sendable {
   case date(
     value: Binding, variant: DateVariant, min: String?, max: String?, step: Double?,
     onChange: Closure?)
+  /// 0.7.0 — the single-control date range: `range`'s pair mechanics with
+  /// `date`'s value conventions (an identical associated-value list to `date`,
+  /// reusing the existing `DateVariant` — no new enum). In a filter context the
+  /// pair binds ONE filter param, not two, which is the reason the case exists
+  /// rather than two coordinated `date` fields.
+  case dateRange(
+    value: Binding, variant: DateVariant, min: String?, max: String?, step: Double?,
+    onChange: Closure?)
 }
 
 public struct FormField: Equatable, Sendable {

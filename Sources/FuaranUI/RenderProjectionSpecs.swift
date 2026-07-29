@@ -317,6 +317,8 @@ extension Decode {
     static let choice = StaticValue.stringOpt(nil)
     static let range = StaticValue.floatPair(0.0, 0.0)
     static let date = StaticValue.ast(.string(""))
+    /// ISO-empty both ends — the pair analogue of `date`'s "" placeholder.
+    static let dateRange = StaticValue.stringPair("", "")
   }
 
   static func formFieldKind(
@@ -387,10 +389,29 @@ extension Decode {
         variant: try bareEnum("\(path).variant", try req(path, f, "variant"), "DateVariant"),
         min: try optString(path, f, "min"), max: try optString(path, f, "max"),
         step: try optFloat(path, f, "step"), onChange: onChange)
+    case "DateRange":
+      // The canonical Static pair rides as the BARE `{from, to}` object (no
+      // `$type`) — accept it before the generic binding dispatch, exactly as
+      // `Range` does above. The `valueOr` fallback carries both lenient forms
+      // (bare two-element array, and the explicit `Static` envelope).
+      let value: Binding
+      if case .object(let pf)? = f["value"], pf["$type"] == nil, pf["from"] != nil,
+        pf["to"] != nil
+      {
+        value = .staticValue(try StaticSlot.stringPair.parse("\(path).value", .object(pf)))
+      } else {
+        value = try valueOr(.stringPair, ControlValueDefaults.dateRange)
+      }
+      return .dateRange(
+        value: value,
+        variant: try bareEnum("\(path).variant", try req(path, f, "variant"), "DateVariant"),
+        min: try optString(path, f, "min"), max: try optString(path, f, "max"),
+        step: try optFloat(path, f, "step"), onChange: onChange)
     case let o:
       throw unknownCase(
         path, o,
-        "Text | Number | Checkbox | Choice | Range | RangedNumber | SegmentedChoice | TextArea | Date"
+        "Text | Number | Checkbox | Choice | Range | RangedNumber | SegmentedChoice | TextArea "
+          + "| Date | DateRange"
       )
     }
   }

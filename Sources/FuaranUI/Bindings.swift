@@ -34,6 +34,10 @@ public enum StaticValue: Equatable, Sendable {
   case markers([MapMarker])
   /// The 0.2.0 `FormFieldKind.Range` dual-thumb `(min, max)` pair.
   case floatPair(Double, Double)
+  /// The 0.7.0 `FormFieldKind.DateRange` ordered `(from, to)` ISO-8601 pair.
+  /// Rides as the BARE `{"from":…,"to":…}` object — no `Static` envelope,
+  /// exactly the `floatPair` posture above.
+  case stringPair(String, String)
 }
 
 /// A value binding (§3.3), one case per wire `$type`.

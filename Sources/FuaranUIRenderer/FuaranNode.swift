@@ -610,6 +610,20 @@
             }
           }
         }
+      case .dateRange(let value, _, _, _, _, _):
+        // 0.7.0 — the single-control date range. The structural intent that
+        // transfers from the reference renderer is ONE pair with ONE write-back,
+        // not two coordinated `date` fields — so this renders one labelled row
+        // showing both ends over a separator, not a pair of independent
+        // controls. (The reference's CSS-class contract does not transfer;
+        // SwiftUI has no class vocabulary.) Inert like the other non-text
+        // controls at this render floor; `BindingContext.flatten` supplies the
+        // "from – to" form for a resolved static pair.
+        labelled(label) {
+          HStack(spacing: 4) {
+            Text(ctx.resolve(value)).font(.caption)
+          }
+        }
       }
     }
 

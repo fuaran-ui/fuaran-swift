@@ -577,6 +577,28 @@
     }
   }
 
+  /// **Write-back audit (Phase 667).** Every value-carrying arm below is one of two things,
+  /// deliberately, and the distinction is the whole finding:
+  ///
+  /// * **Wired** — `.text` / `.number` (`StatefulTextField`) and `.checkbox`
+  ///   (`StatefulToggle`) are live controls that commit through `stateKeyOf(value)` to
+  ///   `FuaranHost.writeBack`.
+  /// * **Inert by construction** — `.choice`, `.date`, `.textArea`, `.range`, `.rangedNumber`
+  ///   are `.disabled(true)` over a `.constant` binding, and `.segmentedChoice` / `.dateRange`
+  ///   are plain `Text`. The user cannot edit them at all, so there is no input to drop.
+  ///
+  /// That second group is a **render floor, not the Kotlin defect class**. The sibling host had
+  /// live, editable controls whose `onValueChange` updated a local buffer and never reached the
+  /// store — a user's typing vanishing silently. Nothing here does that: an arm either commits
+  /// or refuses input up front. Wiring `writeBack` into a `.constant`/`.disabled` arm would be
+  /// dead code that merely looked like a fix.
+  ///
+  /// Making these live is renderer feature work (real pickers, live slider thumbs), not a
+  /// write-back gap, and it is deliberately not done here.
+  ///
+  /// **Forward-coupling:** a NEW value-carrying arm must either wire `stateKeyOf` +
+  /// `writeBack` in the same change, or land `.disabled(true)` and join the list above. The
+  /// tree is sealed, so the compiler forces the arm to EXIST — it cannot force it to WRITE.
   private struct RenderFormField: View {
     let field: FormField
     let ctx: BindingContext

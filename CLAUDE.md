@@ -125,6 +125,18 @@ staticlib directly**, which is how the Swift↔C-ABI binding is exercised end-to
 (`SessionTests` seeds a session → applies a `TreeOp` → reads `tree_json` → re-projects with the
 Phase-538 decoder).
 
+## Control write-back — a forward-coupling rule (Phase 667)
+
+A value-carrying control arm in `FuaranNode.swift` must, **in the same change that adds it**,
+either commit through `stateKeyOf(value)` + `FuaranHost.writeBack`, or be `.disabled(true)` over
+a `.constant` binding and be listed in the write-back audit comment on `RenderFormField`.
+
+**Why this needs a written rule.** The renderer dispatches over a sealed tree, so the compiler
+forces a new arm to EXIST but cannot force it to WRITE. Today `.text` / `.number` / `.checkbox`
+are wired and the rest are inert by construction — which is a render floor, not a defect, because
+a disabled control drops no input. The failure mode to avoid is a *live* control that quietly
+fails to commit; the sibling Kotlin host shipped exactly that in five arms (Phase 667).
+
 ## Cross-repo dependencies
 
 The pure-Swift `FuaranUI` render projection has no upstream dependency on any other sibling. At test

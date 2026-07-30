@@ -81,7 +81,8 @@
     case .list(let k): return AnyView(RenderList(k: k, ctx: ctx))
     case .toast(let k): return AnyView(RenderToast(k: k, ctx: ctx))
     case .codeBlock(let k): return AnyView(RenderCodeBlock(code: k.code))
-    case .math(let k): return AnyView(Text(k.source).font(.system(.body, design: .monospaced)).padding(2))
+    case .math(let k):
+      return AnyView(Text(k.source).font(.system(.body, design: .monospaced)).padding(2))
     case .drawing(let k): return AnyView(RenderDrawing(k: k, ctx: ctx))
     // Input
     case .form(let k): return AnyView(RenderForm(k: k, ctx: ctx))
@@ -91,18 +92,23 @@
       return AnyView(Button(ctx.resolveText(k.label)) {}.disabled(ctx.resolveBool(k.disabled)))
     case .select(let k): return AnyView(RenderSelect(k: k, ctx: ctx))
     // Visualisation
-    case .dataGrid(let k): return AnyView(RenderDataGrid(k: k, ctx: ctx))
+    case .dataGrid(let k): return AnyView(RenderDataGrid(k: k, nodeId: node.id, ctx: ctx))
     case .chart(let k): return AnyView(RenderChart(k: k, ctx: ctx))
     case .map(let k):
-      return AnyView(InfoCard(title: "Map", subtitle: "lat \(k.centreLatitude), lng \(k.centreLongitude) · z\(k.zoom)"))
+      return AnyView(
+        InfoCard(
+          title: "Map", subtitle: "lat \(k.centreLatitude), lng \(k.centreLongitude) · z\(k.zoom)"))
     // Structural
-    case .custom(let k): return AnyView(InfoCard(title: "Custom", subtitle: "\(k.moduleId)/\(k.componentId)"))
+    case .custom(let k):
+      return AnyView(InfoCard(title: "Custom", subtitle: "\(k.moduleId)/\(k.componentId)"))
     case .errorBoundary(let k): return AnyView(FuaranNode(k.child, ctx))
     case .switchKind(let k): return AnyView(RenderSwitch(k: k, ctx: ctx))
     case .fragmentDecl(let k): return AnyView(FuaranNode(k.body, ctx))
     case .fragmentRef(let k): return AnyView(InfoCard(title: "Fragment", subtitle: k.name))
     case .mount(let k):
-      return AnyView(InfoCard(title: "Mount", subtitle: k.scopeId + " · " + k.capabilities.joined(separator: ",")))
+      return AnyView(
+        InfoCard(
+          title: "Mount", subtitle: k.scopeId + " · " + k.capabilities.joined(separator: ",")))
     }
   }
 
@@ -244,7 +250,9 @@
       VStack(alignment: .leading, spacing: 4) {
         HStack(spacing: 4) {
           ForEach(k.children.indices, id: \.self) { i in
-            let label = k.tabHeaders.flatMap { $0.indices.contains(i) ? ctx.resolveText($0[i].label) : nil } ?? "Tab \(i + 1)"
+            let label =
+              k.tabHeaders.flatMap { $0.indices.contains(i) ? ctx.resolveText($0[i].label) : nil }
+              ?? "Tab \(i + 1)"
             Text(label).font(.system(size: 13, weight: i == active ? .bold : .regular)).padding(4)
           }
         }
@@ -292,7 +300,8 @@
         return k.defaultOpen
       }()
       VStack(alignment: .leading, spacing: 2) {
-        Text((open ? "▼ " : "▶ ") + ctx.resolveText(k.heading)).font(.system(size: 14, weight: .semibold))
+        Text((open ? "▼ " : "▶ ") + ctx.resolveText(k.heading)).font(
+          .system(size: 14, weight: .semibold))
         if open { NodeStack(children: k.children, ctx: ctx).padding(.leading, 12) }
       }
     }
@@ -362,7 +371,9 @@
       VStack(alignment: .leading, spacing: 1) {
         Text(ctx.resolveText(k.label)).font(.caption).foregroundStyle(.secondary)
         Text(ctx.resolve(k.value)).font(.system(size: 22, weight: .bold)).foregroundStyle(accent)
-        if let subtext = k.subtext { Text(ctx.resolveText(subtext)).font(.caption2).foregroundStyle(.secondary) }
+        if let subtext = k.subtext {
+          Text(ctx.resolveText(subtext)).font(.caption2).foregroundStyle(.secondary)
+        }
         if let trend = k.trend { Text(ctx.resolve(trend)).font(.caption2) }
       }
       .padding(4)
@@ -387,7 +398,8 @@
 
   private struct RenderSparkline: View {
     var body: some View {
-      RoundedRectangle(cornerRadius: 2).fill(Color(red: 0.69, green: 0.75, blue: 0.77)).frame(width: 80, height: 16)
+      RoundedRectangle(cornerRadius: 2).fill(Color(red: 0.69, green: 0.75, blue: 0.77)).frame(
+        width: 80, height: 16)
     }
   }
 
@@ -399,7 +411,8 @@
       let swatch = tones.swatch(k.tone)
       VStack(alignment: .leading, spacing: 2) {
         if let heading = k.heading {
-          Text(ctx.resolveText(heading)).font(.system(size: 14, weight: .bold)).foregroundStyle(swatch.onContainer)
+          Text(ctx.resolveText(heading)).font(.system(size: 14, weight: .bold)).foregroundStyle(
+            swatch.onContainer)
         }
         Text(ctx.resolveText(k.body)).foregroundStyle(swatch.onContainer)
       }
@@ -467,7 +480,8 @@
     let k: LinkSpec
     let ctx: BindingContext
     var body: some View {
-      Text(ctx.resolveText(k.label)).foregroundStyle(Color(red: 0.08, green: 0.40, blue: 0.75)).padding(2)
+      Text(ctx.resolveText(k.label)).foregroundStyle(Color(red: 0.08, green: 0.40, blue: 0.75))
+        .padding(2)
     }
   }
 
@@ -530,7 +544,9 @@
     var body: some View {
       let labels = labelTexts
       VStack(alignment: .leading, spacing: 2) {
-        if let title = k.title { Text(ctx.resolveText(title)).font(.system(size: 14, weight: .semibold)) }
+        if let title = k.title {
+          Text(ctx.resolveText(title)).font(.system(size: 14, weight: .semibold))
+        }
         Text("Drawing · \(k.shapes.count) shape(s)").font(.caption).foregroundStyle(.secondary)
         ForEach(labels.indices, id: \.self) { i in Text(labels[i]).font(.caption) }
       }
@@ -574,7 +590,9 @@
       case .choice(_, let value, _), .date(let value, _, _, _, _, _):
         labelled(label) { TextField("", text: .constant(ctx.resolve(value))).disabled(true) }
       case .textArea(_, let value, _):
-        labelled(label) { TextField("", text: .constant(ctx.resolve(value)), axis: .vertical).disabled(true) }
+        labelled(label) {
+          TextField("", text: .constant(ctx.resolve(value)), axis: .vertical).disabled(true)
+        }
       case .checkbox(let value, _):
         StatefulToggle(label: label, initial: ctx.resolveBool(value), stateKey: stateKeyOf(value))
       case .range(let value, let minV, let maxV, _, _):
@@ -591,11 +609,16 @@
         let hi = maxV ?? 100
         VStack(alignment: .leading, spacing: 1) {
           Text("\(label): \(numberString(ctx.resolveFloat(value, lo)))").font(.caption)
-          Slider(value: .constant(min(max(ctx.resolveFloat(value, lo), lo), hi)), in: lo...max(hi, lo + 1)).disabled(true)
+          Slider(
+            value: .constant(min(max(ctx.resolveFloat(value, lo), lo), hi)),
+            in: lo...max(hi, lo + 1)
+          ).disabled(true)
         }
       case .segmentedChoice(let options, _, let value, _):
         let selected = ctx.resolve(value)
-        let opts = ctx.resolve(options).split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let opts = ctx.resolve(options).split(separator: ",").map {
+          $0.trimmingCharacters(in: .whitespaces)
+        }.filter { !$0.isEmpty }
         let shown = opts.isEmpty ? [selected.isEmpty ? "—" : selected] : opts
         VStack(alignment: .leading, spacing: 2) {
           Text(label).font(.caption).foregroundStyle(.secondary)
@@ -605,7 +628,9 @@
                 .font(.caption)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(shown[i] == selected ? Color.gray.opacity(0.2) : Color.gray.opacity(0.06))
+                .background(
+                  shown[i] == selected ? Color.gray.opacity(0.2) : Color.gray.opacity(0.06)
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 4))
             }
           }
@@ -627,7 +652,9 @@
       }
     }
 
-    @ViewBuilder private func labelled(_ label: String, @ViewBuilder _ control: () -> some View) -> some View {
+    @ViewBuilder private func labelled(_ label: String, @ViewBuilder _ control: () -> some View)
+      -> some View
+    {
       VStack(alignment: .leading, spacing: 1) {
         Text(label).font(.caption).foregroundStyle(.secondary)
         control()
@@ -690,7 +717,8 @@
     let k: ButtonSpec
     let ctx: BindingContext
     var body: some View {
-      Button(ctx.resolveText(k.label)) { sink?.send(k.onClick) }.disabled(ctx.resolveBool(k.disabled))
+      Button(ctx.resolveText(k.label)) { sink?.send(k.onClick) }.disabled(
+        ctx.resolveBool(k.disabled))
     }
   }
 
@@ -725,10 +753,85 @@
     }
   }
 
+  // ── Grid cells (Phase 752) ────────────────────────────────────────────────
+
+  /// One grid cell: the column's kind decides the rendering, the row supplies
+  /// the datum. An **exhaustive `switch` with no `default`**, so a new cell kind
+  /// is a build error here rather than a silently blank cell.
+  private struct RenderGridCell: View {
+    @Environment(\.fuaranTones) private var tones
+    let column: ColumnErased
+    let row: JSON
+    let ctx: BindingContext
+
+    /// The column's own declarative `field` projection, formatted.
+    private var value: String {
+      guard let field = column.field else { return "" }
+      return formatCellValue(projectRowFieldString(row, field), column.format)
+    }
+
+    var body: some View {
+      switch column.kind {
+      case .text, .numeric, .date:
+        Text(value).font(.caption)
+      case .editable:
+        // Inert on this surface: the write-back seam is a separate concern
+        // (the native-host write-back work), so the value shows but does not
+        // commit. Rendering it as an editable-looking box would promise an
+        // interaction that is not wired.
+        Text(value).font(.caption).padding(.horizontal, 4).padding(.vertical, 1)
+          .overlay(RoundedRectangle(cornerRadius: 3).stroke(.secondary.opacity(0.4)))
+      case .checkbox:
+        // The `get` accessor is a closure, so a decoded tree carries no state:
+        // the box reads unchecked, matching the other hosts' decoded-path floor.
+        Image(systemName: "square").font(.caption)
+      case .button(let label):
+        Button(ctx.resolveText(label)) {}.font(.caption).buttonStyle(.borderless)
+      case .buttonGroup(let labels):
+        HStack(spacing: 4) {
+          ForEach(labels.indices, id: \.self) { i in
+            Button(ctx.resolveText(labels[i])) {}.font(.caption).buttonStyle(.borderless)
+          }
+        }
+      case .link:
+        // `hrefFn` is a closure and never rides the wire, so the projected value
+        // is shown link-styled without a destination — visible, not clickable.
+        Text(value).font(.caption).underline().foregroundStyle(tones.brand.accent)
+      case .pill:
+        // The closure pill: its tone is `(row) -> ToneVariant`, which the wire
+        // cannot carry, so every row takes the default tone. That flatness is
+        // exactly the gap `TonedPill` closes.
+        pillChip(label: value, swatch: tones.swatch(.default))
+      case .tonedPill(let field, let map, let defaultTone):
+        // Phase 750 — the declarative twin. Deliberately the SAME chip as the
+        // closure `pill` arm above: the wire variant exists to make the tone
+        // rule expressible, not to render differently.
+        let lowered = tonedPillOf(row, field, map, defaultTone)
+        pillChip(label: lowered.label, swatch: tones.swatch(lowered.tone))
+      case .progress:
+        // The fraction accessor is a closure; a decoded tree reads 0.
+        ProgressView(value: 0).frame(width: 48)
+      case .custom:
+        Text("—").font(.caption).foregroundStyle(.secondary)
+      }
+    }
+
+    private func pillChip(label: String, swatch: ToneSwatch) -> some View {
+      Text(label)
+        .font(.caption)
+        .foregroundStyle(swatch.onContainer)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 2)
+        .background(swatch.container)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+  }
+
   // ── Visualisation ─────────────────────────────────────────────────────────
 
   private struct RenderDataGrid: View {
     let k: GridSpec
+    let nodeId: String
     let ctx: BindingContext
     var body: some View {
       VStack(alignment: .leading, spacing: 2) {
@@ -747,7 +850,26 @@
             }
           }
         } else {
-          Text("(data-bound rows)").font(.caption2).foregroundStyle(.secondary)
+          // Phase 752 — data-bound rows, seeded by the host from the core's
+          // resolved-rows hand-off. The three outcomes render differently ON
+          // PURPOSE: an unresolved source is not an empty grid, and showing
+          // "no data" for "not yet" is the failure this seam exists to prevent.
+          switch ctx.rows(for: nodeId) {
+          case .rows(let rows) where rows.isEmpty:
+            Text("No rows").font(.caption2).foregroundStyle(.secondary)
+          case .rows(let rows):
+            ForEach(rows.indices, id: \.self) { r in
+              HStack(spacing: 12) {
+                ForEach(k.columns.indices, id: \.self) { ci in
+                  RenderGridCell(column: k.columns[ci], row: rows[r], ctx: ctx)
+                }
+              }
+            }
+          case .notResolved:
+            Text("Loading…").font(.caption2).foregroundStyle(.secondary)
+          case .noRowSource:
+            Text("(no row source)").font(.caption2).foregroundStyle(.secondary)
+          }
         }
       }
       .padding(4)
@@ -760,7 +882,9 @@
     let ctx: BindingContext
     var body: some View {
       VStack(alignment: .leading, spacing: 2) {
-        if let title = k.title { Text(ctx.resolveText(title)).font(.system(size: 14, weight: .semibold)) }
+        if let title = k.title {
+          Text(ctx.resolveText(title)).font(.system(size: 14, weight: .semibold))
+        }
         Text("\(k.kind.rawValue) chart · \(k.xField) × \(k.yFields.joined(separator: ","))")
           .font(.caption)
           .foregroundStyle(.secondary)

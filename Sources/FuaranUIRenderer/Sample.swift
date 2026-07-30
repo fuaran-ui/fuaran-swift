@@ -32,6 +32,11 @@
     func setState(key: String, valueJSON: String) throws {}
     func setFilter(name: String, valueJSON: String) throws {}
     func setQuery(name: String, valueJSON: String) throws {}
+
+    // No evaluator here, so this fake cannot resolve rows. `.notResolved` is the
+    // honest answer — and the safe one, since it renders as a loading surface
+    // rather than asserting an emptiness the fake never established.
+    func resolvedRows(nodeId: String) -> ResolvedRows { .notResolved }
   }
 
   /// A minimal end-to-end sample view: a themed, interactive Fuaran tree over a
@@ -60,7 +65,8 @@
       }
       .task {
         if host == nil {
-          host = try? await FuaranHost.start(session: PreviewTreeSession(initial: Self.sampleTreeJSON))
+          host = try? await FuaranHost.start(
+            session: PreviewTreeSession(initial: Self.sampleTreeJSON))
         }
       }
     }

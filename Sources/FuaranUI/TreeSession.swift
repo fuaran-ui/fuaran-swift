@@ -44,4 +44,39 @@ public protocol FuaranTreeSession: Sendable {
 
   /// Seed a `$queries.<name>` result slot from host-fed data.
   func setQuery(name: String, valueJSON: String) async throws
+
+  /// The **resolved rows** of one row-bearing node (`DataGrid` / `Chart` / `Map` /
+  /// `Sparkline`), evaluated against the session's live sources.
+  ///
+  /// The out-of-band companion to `projectResolved`, and it exists because that
+  /// projection cannot carry this. A row-context `Transform` resolves to a
+  /// *collection*, and the wire's `Static` slot erases a collection to
+  /// `"<opaque>"` (§2 rule 11) — so resolved rows cannot ride the tree at all. A
+  /// decode-only surface therefore cannot obtain them from `treeJSON` however
+  /// much of the tree it understands, and renders every data-bound grid empty.
+  /// This is the hand-off that fixes that, keeping the division the tiers rest
+  /// on: the core evaluates, this surface renders.
+  ///
+  /// A hard requirement rather than an extension default, for the same reason
+  /// `projectResolved` is one: an async default would out-resolve the live
+  /// `FuaranSession` actor's synchronous override at a concrete call site, and
+  /// the failure would look like an empty grid rather than a wiring mistake.
+  func resolvedRows(nodeId: String) async -> ResolvedRows
+}
+
+/// The outcome of a ``FuaranTreeSession/resolvedRows(nodeId:)`` request.
+///
+/// Three cases, not two, and the distinction is load-bearing at the render
+/// boundary: a source that has not resolved (still loading, or a `Transform`
+/// that errored) must render differently from one that genuinely resolved to
+/// nothing. Collapsing them shows "no data" for "not yet".
+public enum ResolvedRows: Equatable, Sendable {
+  /// The source resolved. Possibly to zero rows — that is an **empty state**.
+  case rows([JSON])
+  /// The source did not resolve. Render a **loading** surface, never an empty
+  /// table.
+  case notResolved
+  /// No node carries that id, or its kind has no row source at all — a caller
+  /// mistake rather than a data condition.
+  case noRowSource
 }

@@ -84,6 +84,18 @@ final class SessionTests: XCTestCase {
       {"id":"root","kind":{"$type":"Box","children":[{"id":"count-badge","kind":{"$type":"Badge","label":{"$type":"Bound","binding":{"$type":"Transform","pipeline":[{"$type":"groupBy","aggs":[{"fn":"count","name":"n","of":"id"}],"keys":[]}],"source":{"columns":{"id":{"values":["A","B"]}},"schema":[{"name":"id","type":"string"}]}}},"variant":"Neutral"}}],"layout":{"$type":"Auto"},"role":"Group"}}
       """#
 
+    // A grid whose rows come from an embedded Transform — the shape a decode-only
+    // surface cannot resolve for itself, plus a sibling of a kind with no row
+    // source so the NO_ROW_SOURCE arm has a real node to be asked about.
+    private let boundGridTree = #"""
+      {"id":"root","kind":{"$type":"Box","children":[{"id":"shipments","kind":{"$type":"DataGrid","columns":[{"field":"status","kind":{"$type":"TonedPill","default":"Subdued","field":"status","map":{"Delayed":"Warning"}},"label":"Status"}],"rowKeyField":"status","source":{"$type":"Transform","pipeline":[],"source":{"columns":{"status":{"validity":[true,true],"values":["Delayed","Other"]}},"schema":[{"name":"status","type":"string"}]}}}},{"id":"heading","kind":{"$type":"Heading","level":1,"text":"Shipments","variant":"Standard"}}],"layout":{"$type":"Auto"},"role":"Group"}}
+      """#
+
+    // A grid bound to a Query no host has fed — the unresolved case.
+    private let queryGridTree = #"""
+      {"id":"g","kind":{"$type":"DataGrid","columns":[],"rowKeyField":"id","source":{"$type":"Query","dependsOn":[],"name":"shipments"}}}
+      """#
+
     /// projectResolved folds a scalar-slot Transform to the literal it evaluates
     /// to; the raw treeJSON still carries the unresolved Transform (additive).
     func testProjectResolvedFoldsScalarTransform() async throws {
@@ -101,6 +113,48 @@ final class SessionTests: XCTestCase {
       XCTAssertEqual(
         spec.label, .literal("2"),
         "the Badge label Transform must fold to the literal count 2")
+    }
+
+    /// The Phase 752 rows hand-off, against the live core. The premise is
+    /// asserted rather than assumed: `projectResolved` still carries the raw
+    /// Transform, because a resolved COLLECTION cannot ride a `Static` slot
+    /// (§2 rule 11) — which is the whole reason this call exists. If a future
+    /// change ever does fold rows into the tree, this fails and the seam gets
+    /// revisited rather than quietly outliving its reason.
+    func testResolvedRowsHandsOverWhatTheTreeCannotCarry() async throws {
+      let session = try FuaranSession(treeJSON: boundGridTree)
+
+      let projected = await session.projectResolved()
+      XCTAssertTrue(
+        projected.contains(#""$type":"Transform""#),
+        "the resolved projection cannot carry row-context Transforms")
+
+      guard case .rows(let rows) = await session.resolvedRows(nodeId: "shipments") else {
+        return XCTFail("expected resolved rows")
+      }
+      XCTAssertEqual(rows.count, 2)
+      XCTAssertEqual(rows.first, .object(["status": .string("Delayed")]))
+    }
+
+    /// The three outcomes stay apart across the boundary. Collapsing the middle
+    /// one into zero rows is the defect this seam was shaped to prevent: it
+    /// would render "no data" for "not yet".
+    func testTheThreeRowOutcomesAreDistinguishable() async throws {
+      let session = try FuaranSession(treeJSON: boundGridTree)
+      // A real node of a kind with no row source, and an id naming nothing.
+      let heading = await session.resolvedRows(nodeId: "heading")
+      XCTAssertEqual(heading, .noRowSource)
+      let missing = await session.resolvedRows(nodeId: "nope")
+      XCTAssertEqual(missing, .noRowSource)
+
+      // A grid bound to a Query the host has not fed yet — loading, not empty.
+      let pending = try FuaranSession(treeJSON: queryGridTree)
+      let unfed = await pending.resolvedRows(nodeId: "g")
+      XCTAssertEqual(unfed, .notResolved)
+      // Fed, it resolves — including to genuinely zero rows, the empty state.
+      try await pending.setQuery(name: "shipments", valueJSON: "[]")
+      let fed = await pending.resolvedRows(nodeId: "g")
+      XCTAssertEqual(fed, .rows([]))
     }
 
   #else

@@ -107,6 +107,22 @@
       FuaranSession.consume(fuaran_session_render(handle))
     }
 
+    /// The **resolved rows** of one row-bearing node, evaluated core-side —
+    /// what a decode-only surface cannot get from the tree, because a resolved
+    /// collection cannot ride a `Static` slot (§2 rule 11). See
+    /// ``FuaranTreeSession/resolvedRows(nodeId:)``.
+    ///
+    /// The three outcomes stay distinct all the way to the renderer; an
+    /// unparseable or empty response degrades to ``ResolvedRows/notResolved``
+    /// (a loading surface) rather than to zero rows, so a boundary failure can
+    /// never masquerade as "this grid is empty".
+    public func resolvedRows(nodeId: String) -> ResolvedRows {
+      let out = Array(nodeId.utf8).withUnsafeBufferPointer { bp in
+        FuaranSession.consume(fuaran_session_resolved_rows(handle, bp.baseAddress, bp.count))
+      }
+      return FuaranSession.parseResolvedRows(out)
+    }
+
     // ── Mutations (structured `{"ok":true}` / error envelope) ──────────────────
 
     /// Apply a canonical wire `TreeOp` JSON. Throws `FuaranError` on a decode or
@@ -143,7 +159,8 @@
       // `fn` is always an imported C function (`fuaran_session_set_*`) — it captures
       // nothing and is inherently Sendable. Annotate it so Swift 6 region isolation
       // accepts passing it into the `withUnsafeBufferPointer` closures below.
-      _ fn: @Sendable (OpaquePointer?, UnsafePointer<UInt8>?, Int, UnsafePointer<UInt8>?, Int) ->
+      _ fn:
+        @Sendable (OpaquePointer?, UnsafePointer<UInt8>?, Int, UnsafePointer<UInt8>?, Int) ->
         FuaranBuf,
       key: String, value: String
     ) -> String {
@@ -172,6 +189,23 @@
     /// Throw when a `{"ok":true}` / error-envelope response carried an error.
     private static func throwIfError(_ response: String) throws {
       if let e = parseErrorEnvelope(response) { throw e }
+    }
+
+    /// Parse the resolved-rows envelope: `{"resolved":true,"rows":[…]}`,
+    /// `{"resolved":false}`, or the `NO_ROW_SOURCE` error envelope.
+    ///
+    /// Anything unrecognised — an empty buffer, unparseable bytes, `resolved`
+    /// true with a missing or non-array `rows` — degrades to `.notResolved`.
+    /// That is deliberate: the failure then shows as a loading surface, which is
+    /// honest about not knowing, where `.rows([])` would assert emptiness the
+    /// core never claimed.
+    private static func parseResolvedRows(_ json: String) -> ResolvedRows {
+      guard !json.isEmpty, let value = try? JSON.parse(json), case .object(let root) = value
+      else { return .notResolved }
+      if parseErrorEnvelope(json) != nil { return .noRowSource }
+      guard case .bool(true)? = root["resolved"], case .array(let rows)? = root["rows"]
+      else { return .notResolved }
+      return .rows(rows)
     }
 
     /// Parse a `{"error":{…}}` envelope into a `FuaranError`, or nil for a

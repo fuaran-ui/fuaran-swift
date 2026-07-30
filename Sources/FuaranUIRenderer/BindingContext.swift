@@ -21,12 +21,37 @@ import FuaranUI
 public struct BindingContext: Sendable {
   /// State-key -> current value, seeding `State`-backed bindings for the render.
   public var state: [String: JSON]
+  /// Node id -> the resolved rows of that row-bearing node, seeded by the host
+  /// from `FuaranTreeSession.resolvedRows(nodeId:)`.
+  ///
+  /// Rows arrive through this channel rather than out of the tree because they
+  /// cannot ride the tree: a row-context `Transform` resolves to a collection,
+  /// which the wire's `Static` slot erases to `"<opaque>"` (§2 rule 11). The
+  /// core evaluates and the host seeds; this stays pure, exactly as `state`
+  /// does — no FFI crosses into the renderer.
+  ///
+  /// An **absent** entry is not an empty grid. It means nothing has been seeded
+  /// for that node, which reads as `.notResolved` at the render site: a loading
+  /// surface. Only an explicit `.rows([])` asserts emptiness.
+  public var rows: [String: ResolvedRows]
   /// The render-coverage sink, or nil in production (no tracking).
   public var coverage: RenderCoverage?
 
-  public init(state: [String: JSON] = [:], coverage: RenderCoverage? = nil) {
+  public init(
+    state: [String: JSON] = [:],
+    rows: [String: ResolvedRows] = [:],
+    coverage: RenderCoverage? = nil
+  ) {
     self.state = state
+    self.rows = rows
     self.coverage = coverage
+  }
+
+  /// The resolved rows seeded for `nodeId`, or `.notResolved` when nothing has
+  /// been seeded — the one place that default is decided, so no render arm has
+  /// to remember it.
+  public func rows(for nodeId: String) -> ResolvedRows {
+    rows[nodeId] ?? .notResolved
   }
 
   public static let empty = BindingContext()
@@ -113,4 +138,59 @@ func jsonScalar(_ value: JSON) -> String {
 func numberString(_ d: Double) -> String {
   if d.isFinite, d == d.rounded(), abs(d) < 1e15 { return String(Int(d)) }
   return String(d)
+}
+
+// ── Grid-cell lowering (Phase 752) ───────────────────────────────────────────
+//
+// Pure functions, deliberately OUTSIDE the SwiftUI-gated renderer file. They carry
+// the load-bearing semantics — most of all the tone lookup's unmapped fallback —
+// and a helper that lives inside `#if canImport(SwiftUI)` can only ever be tested
+// on macOS. Here they are exercised on every platform.
+
+/// Project a row property to its display text. The canonical text of the
+/// datum, not a formatted rendering — `CellFormat` is applied separately, and
+/// only where the cell's own semantics call for it, because a tone map's keys
+/// are the author's raw values and keying on a formatted string would not
+/// match them.
+func projectRowFieldString(_ row: JSON, _ field: String) -> String {
+  guard case .object(let fields) = row, let value = fields[field] else { return "" }
+  switch value {
+  case .string(let s): return s
+  case .bool(let b): return b ? "true" : "false"
+  // Through the module's one number printer, not a second inline copy — a
+  // private reader here is how a cell would come to spell `3` where the rest of
+  // the renderer spells `3.0`, and a tone map keyed on the author's raw values
+  // would then miss.
+  case .number(let n): return numberString(n)
+  case .null, .array, .object: return ""
+  }
+}
+
+/// Apply a column's `CellFormat` to a projected value, for the cell kinds that
+/// display a formatted datum. Unknown / structural formats fall through to the
+/// canonical text rather than inventing a rendering.
+func formatCellValue(_ text: String, _ format: CellFormat) -> String {
+  guard let n = Double(text) else { return text }
+  switch format {
+  case .none, .date, .custom: return text
+  case .number(let decimals): return String(format: "%.\(decimals ?? 0)f", n)
+  case .currency(let code): return "\(code) \(String(format: "%.2f", n))"
+  case .percent(let decimals): return String(format: "%.\(decimals ?? 0)f%%", n * 100)
+  case .significantDigits(let digits): return String(format: "%.\(digits)g", n)
+  }
+}
+
+/// Lower a `TonedPill` cell for one row: the named field's text IS the pill's
+/// label, and its tone is the map's entry for that text, or `defaultTone` for
+/// a value the map does not mention.
+///
+/// The whole of the declarative pill's semantics, in one function, because a
+/// per-surface copy of a lookup-with-fallback is exactly how two hosts come to
+/// disagree about an *unmapped* value — the case a parity test misses most
+/// easily. Parity-locked with the reference hosts' `tonedPillOf`.
+func tonedPillOf(
+  _ row: JSON, _ field: String, _ map: [String: ToneVariant], _ defaultTone: ToneVariant
+) -> (label: String, tone: ToneVariant) {
+  let label = projectRowFieldString(row, field)
+  return (label, map[label] ?? defaultTone)
 }

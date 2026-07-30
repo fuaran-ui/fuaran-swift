@@ -71,7 +71,9 @@ final class ServerDrivenDriverTests: XCTestCase {
   }
 
   func testTransportFailureSurfacesAsFatal() async {
-    let driver = ServerDrivenDriver(transport: FailingTransport()) { initial in FixtureSession(initial) }
+    let driver = ServerDrivenDriver(transport: FailingTransport()) { initial in
+      FixtureSession(initial)
+    }
     var states: [DriverState] = []
     let final = await driver.run { states.append($0) }
     guard case .fatal = final else { return XCTFail("expected a fatal terminal state") }
@@ -81,7 +83,10 @@ final class ServerDrivenDriverTests: XCTestCase {
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
-struct FixtureReject: Error { let code: String; let path: String? }
+struct FixtureReject: Error {
+  let code: String
+  let path: String?
+}
 private struct FixtureError: Error { let message: String }
 
 /// An in-memory session interpreting the tiny fixture op protocol
@@ -103,7 +108,8 @@ actor FixtureSession: FuaranTreeSession {
       guard let node = op["node"] else { throw FixtureError(message: "replace missing node") }
       current = encodeJSON(node)
     case "reject":
-      throw FixtureReject(code: stringField(op, "code") ?? "VALIDATION_REJECT", path: stringField(op, "path"))
+      throw FixtureReject(
+        code: stringField(op, "code") ?? "VALIDATION_REJECT", path: stringField(op, "path"))
     default:
       throw FixtureError(message: "unrecognised fixture op")
     }
@@ -112,6 +118,11 @@ actor FixtureSession: FuaranTreeSession {
   func setState(key: String, valueJSON: String) throws {}
   func setFilter(name: String, valueJSON: String) throws {}
   func setQuery(name: String, valueJSON: String) throws {}
+
+  // No evaluator here, so this fake cannot resolve rows. `.notResolved` is the
+  // honest answer — and the safe one, since it renders as a loading surface
+  // rather than asserting an emptiness the fake never established.
+  func resolvedRows(nodeId: String) -> ResolvedRows { .notResolved }
 }
 
 actor FixtureTransport: FuaranTransport {
@@ -155,7 +166,8 @@ func encodeJSON(_ value: JSON) -> String {
   case .string(let s): return "\"" + jsonEscape(s) + "\""
   case .array(let items): return "[" + items.map(encodeJSON).joined(separator: ",") + "]"
   case .object(let members):
-    let body = members.map { "\"\(jsonEscape($0.key))\":\(encodeJSON($0.value))" }.joined(separator: ",")
+    let body = members.map { "\"\(jsonEscape($0.key))\":\(encodeJSON($0.value))" }.joined(
+      separator: ",")
     return "{" + body + "}"
   }
 }
@@ -170,7 +182,11 @@ private func jsonEscape(_ s: String) -> String {
     case "\r": out += "\\r"
     case "\t": out += "\\t"
     default:
-      if ch.value < 0x20 { out += String(format: "\\u%04x", ch.value) } else { out.unicodeScalars.append(ch) }
+      if ch.value < 0x20 {
+        out += String(format: "\\u%04x", ch.value)
+      } else {
+        out.unicodeScalars.append(ch)
+      }
     }
   }
   return out

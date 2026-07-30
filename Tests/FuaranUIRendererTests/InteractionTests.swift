@@ -67,7 +67,8 @@ import XCTest
 
       await host.writeBack(stateKey: "email", value: .string("ada@example.com"))
       let writes = await session.writes
-      XCTAssertTrue(writes.contains { $0.0 == "email" && $0.1.contains("ada@example.com") }, "saw \(writes)")
+      XCTAssertTrue(
+        writes.contains { $0.0 == "email" && $0.1.contains("ada@example.com") }, "saw \(writes)")
     }
 
     func testStateKeyOfExtractsStateSlot() {
@@ -81,16 +82,20 @@ import XCTest
       /// The live round-trip: a real `EditNode` through the Rust session
       /// re-projects, and a bad op surfaces a typed reject with the tree retained.
       func testLiveSessionRoundTrip() async throws {
-        let tree = #"{"id":"h","kind":{"$type":"Heading","level":2,"text":{"$type":"Literal","text":"Hello"},"variant":"Standard"}}"#
+        let tree =
+          #"{"id":"h","kind":{"$type":"Heading","level":2,"text":{"$type":"Literal","text":"Hello"},"variant":"Standard"}}"#
         let session = try FuaranSession(treeJSON: tree)
         let host = try await FuaranHost.start(session: session)
         guard case .heading(let s0) = host.tree.kind else { return XCTFail("expected heading") }
         XCTAssertEqual(s0.level, 2)
 
-        let edit = #"{"$type":"EditNode","target":"h","newKind":{"$type":"Heading","level":3,"text":{"$type":"Literal","text":"Hello"},"variant":"Standard"}}"#
+        let edit =
+          #"{"$type":"EditNode","target":"h","newKind":{"$type":"Heading","level":3,"text":{"$type":"Literal","text":"Hello"},"variant":"Standard"}}"#
         await host.applyOp(edit)
         XCTAssertNil(host.lastError, "a valid EditNode should not error")
-        guard case .heading(let s1) = host.tree.kind else { return XCTFail("expected heading after edit") }
+        guard case .heading(let s1) = host.tree.kind else {
+          return XCTFail("expected heading after edit")
+        }
         XCTAssertEqual(s1.level, 3, "the round-trip should re-project the raised heading level")
 
         await host.applyOp(#"{"$type":"RemoveNode","target":"does-not-exist"}"#)
@@ -122,8 +127,17 @@ import XCTest
     }
 
     func setState(key: String, valueJSON: String) throws { writes.append((key, valueJSON)) }
-    func setFilter(name: String, valueJSON: String) throws { writes.append(("filter:\(name)", valueJSON)) }
-    func setQuery(name: String, valueJSON: String) throws { writes.append(("query:\(name)", valueJSON)) }
+    func setFilter(name: String, valueJSON: String) throws {
+      writes.append(("filter:\(name)", valueJSON))
+    }
+    func setQuery(name: String, valueJSON: String) throws {
+      writes.append(("query:\(name)", valueJSON))
+    }
+
+    // No evaluator here, so this fake cannot resolve rows. `.notResolved` is the
+    // honest answer — and the safe one, since it renders as a loading surface
+    // rather than asserting an emptiness the fake never established.
+    func resolvedRows(nodeId: String) -> ResolvedRows { .notResolved }
   }
 
 #else

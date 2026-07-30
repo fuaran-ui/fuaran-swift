@@ -273,6 +273,18 @@ public enum CellKindErased: Equatable, Sendable {
   case buttonGroup(labels: [TextSource])
   case link
   case pill
+  /// Phase 750 — the declarative twin of `pill`, and the ONE cell kind holding no
+  /// closure, which is exactly why it survives the wire. `field` names the row
+  /// property that is both the pill's label and the map key; `map` carries value →
+  /// tone; `defaultTone` covers a value the map does not mention and is omitted on
+  /// the wire at `.default`.
+  ///
+  /// This is the first cell kind this projection carries any PAYLOAD for. Every
+  /// other one is defined by a closure, which never rides the wire, so the case
+  /// name was the whole of the information — a decode-only projection could
+  /// faithfully represent it as a bare case. A declared tone rule is data, so it
+  /// has to be carried.
+  case tonedPill(field: String, map: [String: ToneVariant], defaultTone: ToneVariant)
   case progress
   case custom
 }

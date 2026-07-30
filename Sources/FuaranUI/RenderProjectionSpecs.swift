@@ -492,9 +492,70 @@ extension Decode {
 
   // ── Visualisation specs ────────────────────────────────────────────────────
 
+  /// The tone-map field names a `TonedPill` cell accepts, canonical first. `map` is
+  /// the shortest honest name for a value→tone dictionary and the least descriptive.
+  static let toneMapKeys = ["map", "toneMap", "tones"]
+
+  /// Phase 750 — a `TonedPill`'s `map`: a string-keyed object whose VALUES are
+  /// `ToneVariant`s. Routed through `toneVariant` per entry, so the §3.6 tone aliases
+  /// work inside the map exactly as they do at a `tone` field; a second, private tone
+  /// reader here is precisely how this position would come to accept a vocabulary the
+  /// `tone` field does not.
+  ///
+  /// The refusal is RE-ISSUED rather than passed through. `unknownCase` reports at
+  /// `<path>.$type` with "unknown discriminator", and a map value is neither a
+  /// discriminator nor at a `$type` key — so the raw error names a path the document
+  /// does not contain, which is actively misleading. The re-issue keeps the code and
+  /// the seven legal names and points at the offending KEY, because "one of your
+  /// tones is wrong" is not an actionable report when the map has nine entries. A
+  /// non-string value is a `wrongType` and already reports at the right path, so it
+  /// passes through untouched.
+  static func toneMap(_ path: String, _ j: JSON) throws -> [String: ToneVariant] {
+    let f = try object(path, j)
+    var out: [String: ToneVariant] = [:]
+    out.reserveCapacity(f.count)
+    for (key, v) in f {
+      let entryPath = "\(path).\(key)"
+      do {
+        out[key] = try toneVariant(entryPath, v)
+      } catch let e as FuaranDecodeError where e.code == .unknownDuCase {
+        let got: String
+        if case .string(let s) = v { got = s } else { got = "" }
+        throw err(
+          .unknownDuCase, entryPath,
+          "tone-map value '\(got)' for '\(key)' is not a ToneVariant; expected "
+            + ToneVariant.allCases.map { $0.rawValue }.joined(separator: " | "))
+      }
+    }
+    return out
+  }
+
+  /// The shared body of the canonical `TonedPill` case and the `Pill`-tagged §16
+  /// shorthand — ONE reader, so the two spellings cannot drift apart in what they
+  /// accept.
+  static func tonedPill(_ path: String, _ f: [String: JSON]) throws -> CellKindErased {
+    let field = try reqString(path, f, "field")
+    let map = try toneMap(
+      "\(path).map", try reqAliased(path, f, toneMapKeys[0], Array(toneMapKeys.dropFirst())))
+    // `default` is omitted-when-`.default` (Phase 460); an absent key restores the
+    // identity, and an aliased `Neutral` normalises to `.default` — two rules
+    // composing, in that order.
+    let defaultTone = try optToneDefault(path, f, "default")
+    return .tonedPill(field: field, map: map, defaultTone: defaultTone)
+  }
+
   static func cellKindErased(_ path: String, _ j: JSON) throws -> CellKindErased {
     let f = try object(path, j)
     switch try disc(path, f) {
+    // Lenient-ingest (WIRE_FORMAT.md §16, Phase 750): "pill" is the WORD for the
+    // thing, so a declarative tone rule arrives tagged `Pill` more often than tagged
+    // `TonedPill`. Before this phase those keys were accepted and DISCARDED — the
+    // author's whole intent gone, silently, with no error to notice. Presence of a
+    // tone map is the unambiguous tell: a closure `Pill` carries only
+    // `labelFn`/`toneFn` and can never carry one.
+    case "Pill" where toneMapKeys.contains(where: { f[$0] != nil }):
+      return try tonedPill(path, f)
+    case "TonedPill": return try tonedPill(path, f)
     case "Text": return .text
     case "Numeric": return .numeric
     case "Date": return .date
@@ -515,7 +576,7 @@ extension Decode {
     case let o:
       throw unknownCase(
         path, o,
-        "Text | Numeric | Date | Editable | Checkbox | Button | ButtonGroup | Link | Pill | Progress | Custom"
+        "Text | Numeric | Date | Editable | Checkbox | Button | ButtonGroup | Link | Pill | TonedPill | Progress | Custom"
       )
     }
   }

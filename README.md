@@ -40,6 +40,46 @@ for child in box.children {
 Full walkthrough — decode → render projection → SwiftUI:
 <https://fuaran-ui.io/get-started/swift>.
 
+## Safety floor — what the embedding app must do
+
+A decoded tree is **untrusted input**. It usually arrives from a model, and a model will happily
+emit a `Link` whose `href` is `javascript:…` or a `Navigate` whose `route` points somewhere you did
+not intend. Two obligations, and the first is the one that bites:
+
+**1. Never open a tree-supplied URL without the floor.** `LinkSpec.href`, `ImageSpec.src` and
+`Action.navigate(route:)` are handed to you exactly as the wire spelled them. Route every one
+through `FuaranUrlPolicy` before it reaches `UIApplication.open`, `NSWorkspace.open`, an
+`URLRequest`, or any web view you add:
+
+```swift
+switch link.sanitizedHref {                       // NOT link.href
+case .allowed(let url):  open(URL(string: url)!)  // http / https / mailto / tel, or relative
+case .rejected(_, let why): log("refused destination: \(why)")
+case .dynamic:                                    // the slot is a State / Query / Format binding
+    // Resolve it however your app resolves bindings (read the session's
+    // resolved projection), then apply the same floor to the result:
+    if let safe = FuaranUrlPolicy.sanitize(resolvedHref) { open(URL(string: safe)!) }
+}
+```
+
+The allowlist is `http` / `https` / `mailto` / `tel` plus relative paths and fragments. Everything
+else is refused, including unknown schemes (deny by default), protocol-relative `//host` forms, and
+backslash forms — `\\host`, `/\host` — which several URL parsers normalise back to `//`. The scheme
+candidate is scrubbed of ASCII whitespace and control characters first, so `java\tscript:` is
+classified as `javascript:` and refused; a `hasPrefix("javascript:")` check of your own is not a
+floor.
+
+**2. Do not build an HTML path for tree text.** This surface has no `WKWebView` and no
+HTML-parsing attributed-string path, and that absence is why it carries no script-injection sink at
+all. `Markdown.text`, labels and every other `TextSource` are rendered as native `Text`. Passing
+that content through `NSAttributedString(data:options:documentType:.html)`, or into a web view,
+reintroduces exactly the class the native projection removed.
+
+The floor is a public accessor rather than a decode-time filter deliberately: `href` / `src` are
+`Binding`s whose value may not exist until the core resolves a `State`, `Query` or `Format` slot, so
+a check at decode time would be examining a placeholder. The projection stays a faithful view of the
+wire; the check happens where a real destination exists.
+
 ## Layout
 
 ```

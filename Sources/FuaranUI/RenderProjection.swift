@@ -311,10 +311,29 @@ enum Decode {
 
   // ── JSON value passthrough (structured positions, rule 12) ────────────────
 
-  static func jval(_ path: String, _ j: JSON) -> JSON { j }
+  /// A host-opaque JSON payload slot (`SetState.value`, `Notify.payload`,
+  /// `AiTool.args`, a `Custom` prop). The value is held raw — the projection
+  /// never interprets it — but an explicit `null` is NOT a payload. The wire
+  /// spells absence by omitting the key, so a `null` here is a malformed
+  /// document, and accepting it hands the embedding app a slot that claims to
+  /// carry a value and does not. The corpus pins this as the
+  /// `reject-null-action-*` / `reject-null-custom-prop` / `reject-null-i18n-arg`
+  /// family.
+  static func jval(_ path: String, _ j: JSON) throws -> JSON {
+    guard case .null = j else { return j }
+    throw wrongType(
+      path, "a JSON value (an explicit null is not a payload — omit the key instead)")
+  }
 
+  /// A string-keyed map of host-opaque payload values (`Custom.props`,
+  /// `TextSource.I18n.args`). The same rule, applied per ENTRY so the refusal
+  /// names the offending key rather than the whole map.
   static func jvalMap(_ path: String, _ j: JSON) throws -> [String: JSON] {
-    try object(path, j)
+    let f = try object(path, j)
+    for (key, v) in f.sorted(by: { $0.key < $1.key }) {
+      _ = try jval("\(path).\(key)", v)
+    }
+    return f
   }
 }
 
@@ -716,18 +735,18 @@ extension Decode {
     case "Notify":
       return .notify(
         channel: try reqString(path, f, "channel"),
-        payload: jval("\(path).payload", try req(path, f, "payload")))
+        payload: try jval("\(path).payload", try req(path, f, "payload")))
     // Field aliases: href (the dominant web name) / url / to → route.
     case "Navigate":
       return .navigate(route: try reqStringAliased(path, f, "route", ["href", "url", "to"]))
     case "SetState":
       return .setState(
         key: try reqString(path, f, "key"),
-        value: jval("\(path).value", try req(path, f, "value")))
+        value: try jval("\(path).value", try req(path, f, "value")))
     case "AiTool":
       return .aiTool(
         toolName: try reqString(path, f, "toolName"),
-        args: jval("\(path).args", try req(path, f, "args")))
+        args: try jval("\(path).args", try req(path, f, "args")))
     case "Chain":
       let items = try array("\(path).ops", try req(path, f, "ops"))
       return .chain(try items.enumerated().map { try action("\(path).ops[\($0.0)]", $0.1) })

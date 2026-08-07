@@ -34,6 +34,8 @@ final class CorpusTests: XCTestCase {
     let kind: String
     let decoder: String
     let inputFile: String
+    let expectedErrorCode: String?
+    let expectedPath: String?
   }
 
   static func loadFixtures(_ corpus: URL) throws -> [Fixture] {
@@ -50,7 +52,14 @@ final class CorpusTests: XCTestCase {
         case .string(let decoder)? = f["decoder"],
         case .string(let inputFile)? = f["inputFile"]
       else { continue }
-      out.append(Fixture(id: id, kind: kind, decoder: decoder, inputFile: inputFile))
+      var code: String? = nil
+      if case .string(let c)? = f["expectedErrorCode"] { code = c }
+      var path: String? = nil
+      if case .string(let p)? = f["expectedPath"] { path = p }
+      out.append(
+        Fixture(
+          id: id, kind: kind, decoder: decoder, inputFile: inputFile,
+          expectedErrorCode: code, expectedPath: path))
     }
     return out
   }
@@ -116,5 +125,71 @@ final class CorpusTests: XCTestCase {
     }
     // The corpus exercises well over a dozen distinct node kinds.
     XCTAssertGreaterThanOrEqual(kinds.count, 15, "expected the node corpus to span many kinds")
+  }
+
+  /// The REJECT leg: every malformed `node`-decoder fixture must fail to decode
+  /// with the corpus's canonical error code and a `$`-rooted path carrying the
+  /// expected prefix.
+  ///
+  /// This is the negative half of the decode contract, and it was missing while
+  /// the positive half was gated — which is the worse of the two omissions to
+  /// have. A decoder that accepts every valid tree and also accepts malformed
+  /// ones is not "lenient"; it hands the embedding app a projection whose typed
+  /// slots do not mean what their types say, and nothing in the render path
+  /// would ever notice.
+  ///
+  /// **Path matching is by PREFIX**, mirroring the reference host's own reject
+  /// leg. A discriminator refusal legitimately reports at `<path>.$type` where
+  /// the corpus records `<path>`, so an equality check would fail on a correct
+  /// message; the prefix rule keeps the assertion strict about *where* without
+  /// pinning a suffix the spec does not fix.
+  ///
+  /// **Two documented, justified exclusions** — neither a filter over the reject
+  /// family, both a decoder that does not exist on this surface:
+  ///
+  ///  - `decoder == "op"` fixtures. This surface has no `TreeOp` decoder at all
+  ///    — the Rust core owns apply and mutation, and a render projection never
+  ///    sees an op. There is nothing here to feed them to.
+  ///  - the `envelope-reject` family (a separate manifest kind, not part of the
+  ///    reject family this test covers). It asserts `FOREIGN_PROFILE`, which
+  ///    belongs to versioning-envelope negotiation — a codec-host obligation
+  ///    this decode-only surface does not carry and does not model.
+  func testEveryRejectFixtureIsRefused() throws {
+    guard let corpus = Self.corpusDir() else {
+      throw XCTSkip("wire-format-fixtures corpus not found — standalone checkout; skipping.")
+    }
+    let rejects = try Self.loadFixtures(corpus).filter {
+      $0.kind == "reject" && $0.decoder == "node"
+    }
+    XCTAssertGreaterThan(rejects.count, 0, "the corpus declared no node reject fixtures")
+
+    var failures: [String] = []
+    for fx in rejects {
+      let expectedCode = fx.expectedErrorCode ?? ""
+      let expectedPath = fx.expectedPath ?? "$"
+      let json = (try? String(contentsOf: corpus.appendingPathComponent(fx.inputFile), encoding: .utf8)) ?? ""
+      do {
+        _ = try RenderProjection.decodeNode(json)
+        failures.append(
+          "\(fx.id): decode ACCEPTED a malformed input (expected \(expectedCode) at \(expectedPath))")
+      } catch let e as FuaranDecodeError {
+        if e.code.rawValue != expectedCode {
+          failures.append(
+            "\(fx.id): wrong code — expected \(expectedCode), got \(e.code.rawValue) at \(e.path): \(e.message)"
+          )
+        } else if !e.path.hasPrefix(expectedPath) {
+          failures.append(
+            "\(fx.id): wrong path — expected prefix \(expectedPath), got \(e.path)")
+        }
+      } catch {
+        failures.append("\(fx.id): threw an untyped error \(error) (expected FuaranDecodeError)")
+      }
+    }
+
+    XCTAssertTrue(
+      failures.isEmpty,
+      "\(failures.count) of \(rejects.count) reject fixtures failed:\n" + failures.joined(separator: "\n")
+    )
+    print("CORPUS REJECT LEG: \(rejects.count) fixtures refused with the canonical code + path")
   }
 }

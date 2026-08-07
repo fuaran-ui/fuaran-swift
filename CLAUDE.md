@@ -83,6 +83,39 @@ decodes every `node`-decoder fixture (node-round-trip + lenient-accept shorthand
 model; a decode throw is a hard failure (that is the "zero fallback-arm hits" bar). Coverage is
 reported per `NodeKind`. The harness skips cleanly when the corpus is absent (standalone checkout).
 
+### Corpus REJECT leg — the negative half of the same contract
+
+The same file runs every `node`-decoder **reject** fixture and requires each to fail with the
+corpus's canonical code and a `$`-rooted path carrying the expected **prefix** (a discriminator
+refusal legitimately reports at `<path>.$type` where the corpus records `<path>`, so equality would
+fail a correct message; the reference host's own reject leg matches by prefix for the same reason).
+A decode that SUCCEEDS is the hard failure.
+
+Two exclusions, both documented in the test and neither a filter over the family: `decoder == "op"`
+fixtures have no decoder here at all (the core owns apply; a render projection never sees a
+`TreeOp`), and the `envelope-reject` family asserts `FOREIGN_PROFILE` — versioning-envelope
+negotiation, a codec-host obligation this decode-only surface does not carry.
+
+**Forward-coupling rule.** A new host-opaque payload slot (`SetState.value`-shaped: held raw,
+never interpreted) goes through `Decode.jval` / `Decode.jvalMap`, which refuse an explicit `null`.
+The wire spells absence by omitting a key, so a `null` in a payload slot is malformed; reading it
+raw would hand the embedding app a slot that claims to carry a value and does not.
+
+### The URL safety floor (`Sources/FuaranUI/UrlPolicy.swift`)
+
+`FuaranUrlPolicy` + the `sanitizedHref` / `sanitizedSrc` / `sanitizedNavigateRoute` accessors are
+the surface's answer to "who checks the destination". **Chosen posture: a public accessor, not a
+decode-time filter** — `href` / `src` are `Binding`s whose value may not exist until the core
+resolves a `State` / `Query` / `Format` slot, so a decode-time allowlist would be checking a
+placeholder, and filtering during decode would also stop the projection being a faithful view of
+the wire. The consumer obligations are stated in the README's "Safety floor" section; keep them
+there (they are what a consumer reads) rather than only here.
+
+A renderer arm that ever *does* resolve a URL onward — a real image loader, a tappable link — must
+route it through `FuaranUrlPolicy.sanitize` in the same change that adds it. This is the same
+shape as the Phase-667 write-back rule below, and for the same reason: the compiler forces the arm
+to exist, it cannot force the arm to check.
+
 ## Native C-ABI session binding (FuaranCore + FuaranSession)
 
 The certified Rust reference core is wired under the Swift surface through a C-ABI:

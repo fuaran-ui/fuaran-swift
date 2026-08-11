@@ -94,6 +94,14 @@ public enum ImageVariant: String, CaseIterable, Equatable, Sendable {
   case rounded = "Rounded"
 }
 
+/// Anti-scraper render strategy for a `Link` — `email` marks a `mailto:` link
+/// whose address must not appear in plaintext in emitted markup (the emission
+/// strategy is renderer-owned; a render projection may treat it as advisory).
+/// Lower-case on the wire.
+public enum LinkProtection: String, CaseIterable, Equatable, Sendable {
+  case email = "email"
+}
+
 public enum MathDisplay: String, CaseIterable, Equatable, Sendable {
   case inline = "Inline"
   case block = "Block"

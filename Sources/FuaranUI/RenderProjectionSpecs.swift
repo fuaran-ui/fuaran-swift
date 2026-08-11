@@ -43,7 +43,9 @@ extension Decode {
     // The `emphasis` here is the behavioural bool: 0.2.2 omitted-when-false,
     // cross-vocab coerced when a model writes the enum spelling.
     let emphasis: Bool
-    if let v = f["emphasis"] { emphasis = try emphasisFlag("\(path).emphasis", v) } else {
+    if let v = f["emphasis"] {
+      emphasis = try emphasisFlag("\(path).emphasis", v)
+    } else {
       emphasis = false
     }
     return LabelValueRowSpec(
@@ -58,7 +60,9 @@ extension Decode {
   static func factSpec(_ path: String, _ j: JSON) throws -> FactSpec {
     let f = try object(path, j)
     let emphasis: Bool
-    if let v = f["emphasis"] { emphasis = try emphasisFlag("\(path).emphasis", v) } else {
+    if let v = f["emphasis"] {
+      emphasis = try emphasisFlag("\(path).emphasis", v)
+    } else {
       emphasis = false
     }
     return FactSpec(
@@ -84,12 +88,17 @@ extension Decode {
 
   static func linkSpec(_ path: String, _ j: JSON) throws -> LinkSpec {
     let f = try object(path, j)
+    // `protection` is an optional closed enumeration — an unknown case is
+    // UNKNOWN_DU_CASE at `$.kind.protection` (the corpus reject family pins it).
+    let protection: LinkProtection? =
+      try f["protection"].map { try bareEnum("\(path).protection", $0, "LinkProtection") }
     return LinkSpec(
       href: try reqBinding(path, f, "href"),
       label: try reqTextSource(path, f, "label"),
       download: try reqBool(path, f, "download"),
       rel: try optString(path, f, "rel"),
-      target: try optString(path, f, "target"))
+      target: try optString(path, f, "target"),
+      protection: protection)
   }
 
   static func imageSpec(_ path: String, _ j: JSON) throws -> ImageSpec {
@@ -371,7 +380,9 @@ extension Decode {
       // Lenient omitted-when-default (§3.6): absent restores the language
       // default `Horizontal` (decode-optional).
       let orient: Orientation
-      if let v = f["orientation"] { orient = try orientation("\(path).orientation", v) } else {
+      if let v = f["orientation"] {
+        orient = try orientation("\(path).orientation", v)
+      } else {
         orient = .horizontal
       }
       return .segmentedChoice(
@@ -759,7 +770,9 @@ extension Decode {
     }
     // 0.2.0 — omitted-when-default (Horizontal), encoder-symmetric.
     let orient: Orientation
-    if let v = f["orientation"] { orient = try orientation("\(path).orientation", v) } else {
+    if let v = f["orientation"] {
+      orient = try orientation("\(path).orientation", v)
+    } else {
       orient = .horizontal
     }
     return TabsSpec(

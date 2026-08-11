@@ -90,6 +90,8 @@ public struct LinkSpec: Equatable, Sendable {
   public var download: Bool
   public var rel: String?
   public var target: String?
+  /// Omitted on the wire when `nil`.
+  public var protection: LinkProtection?
 }
 
 public struct ImageSpec: Equatable, Sendable {

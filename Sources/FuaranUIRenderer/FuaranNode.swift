@@ -340,8 +340,8 @@
       // `on` is the more specific declaration and wins where both are present; the
       // decoder has already refused a Switch carrying neither, so the empty tail is
       // unreachable rather than a silent default-to-empty.
-      let selector: Binding? =
-        k.on ?? k.stateKey.map { .state(key: $0, defaultValue: .stringOpt(nil)) }
+      let selector: FuaranUI.Binding? =
+        k.on ?? k.stateKey.map { FuaranUI.Binding.state(key: $0, defaultValue: .stringOpt(nil)) }
       let current = selector.map { ctx.resolve($0) } ?? ""
       let chosen = k.cases.first { $0.matchValue == current }?.child ?? k.defaultChild
       FuaranNode(chosen, ctx)

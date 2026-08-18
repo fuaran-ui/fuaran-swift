@@ -135,6 +135,75 @@ import XCTest
       XCTAssertEqual(Double(onPivot.y), Double(Self.pivot.y), accuracy: 2)
     }
 
+    // ── The label arm, in ink ────────────────────────────────────────────────
+
+    /// The rendered label, at a known anchor inside an identity transform.
+    private func labelProbe(rotation: Double, anchor: TextAnchor) -> some View {
+      let t = DrawingTransform(
+        viewBox: ViewBox(minX: 0, minY: 0, width: Double(Self.side), height: Double(Self.side)),
+        width: Double(Self.side), height: Double(Self.side))
+      let style = DrawStyle(
+        fill: .staticValue(.stringOpt("#000000")), textAnchor: anchor, fontSize: 16,
+        rotation: rotation)
+      return ZStack(alignment: .topLeading) {
+        fuaranDrawLabelView(
+          x: Double(Self.pivot.x), y: Double(Self.pivot.y), text: "AVERAGE", style: style, t: t,
+          ctx: .empty)
+      }
+      .frame(width: Self.side, height: Self.side, alignment: .topLeading)
+    }
+
+    /// A rotated LABEL turns about its own ANCHOR POINT — asserted in ink, and
+    /// without depending on a single font metric.
+    ///
+    /// Two renders of the same `End`-anchored word, upright and at −90°. Two
+    /// facts together pin the pivot, where either alone would not:
+    ///
+    ///   • the ink's DISTANCE from the anchor is unchanged — a rotation about
+    ///     any other point would carry the run off its own circle;
+    ///   • the ink MOVED — which rules out the plausible wrong construction, a
+    ///     laid-out text box turned about its own centre, under which a long
+    ///     category label swings away from the tick it names while every
+    ///     distance-preserving check still passes.
+    ///
+    /// And the direction is checked too: an `End`-anchored run lies to the LEFT
+    /// of its anchor upright, and at −90° swings BELOW it.
+    func testARotatedLabelTurnsAboutItsAnchorPointAndNotItsOwnCentre() throws {
+      let upright = try opaqueCentroid(labelProbe(rotation: 0, anchor: .end))
+      let turned = try opaqueCentroid(labelProbe(rotation: -90, anchor: .end))
+
+      func distanceFromAnchor(_ p: CGPoint) -> Double {
+        let dx = Double(p.x - Self.pivot.x)
+        let dy = Double(p.y - Self.pivot.y)
+        return (dx * dx + dy * dy).squareRoot()
+      }
+
+      // Upright: the run ENDS at the anchor, so its ink sits to the left of it
+      // and astride the baseline.
+      XCTAssertLessThan(Double(upright.x), Double(Self.pivot.x) - 5, "upright ink \(upright)")
+      XCTAssertEqual(
+        Double(upright.y), Double(Self.pivot.y), accuracy: 12, "upright ink \(upright)")
+
+      // Rotated: same circle about the anchor…
+      XCTAssertEqual(
+        distanceFromAnchor(turned), distanceFromAnchor(upright), accuracy: 3,
+        "the run left its own circle — the pivot is not the anchor point "
+          + "(upright \(upright), turned \(turned))")
+
+      // …but a different place on it.
+      let travelled =
+        ((Double(turned.x - upright.x)) * (Double(turned.x - upright.x))
+        + (Double(turned.y - upright.y)) * (Double(turned.y - upright.y))).squareRoot()
+      XCTAssertGreaterThan(
+        travelled, 10,
+        "the ink did not move — the label turned about its own centre, not its anchor")
+
+      // …and specifically BELOW the anchor, which is where an anti-clockwise
+      // quarter-turn carries a run that was lying to its left.
+      XCTAssertGreaterThan(
+        Double(turned.y), Double(Self.pivot.y) + 10, "turned ink \(turned)")
+    }
+
     // ── The arm itself builds, for every shape in the corpus fixtures ────────
 
     private func drawingFixture(_ relativePath: String) throws -> DrawingSpec {

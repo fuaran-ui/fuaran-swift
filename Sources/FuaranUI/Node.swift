@@ -165,7 +165,7 @@ public indirect enum NodeKind: Equatable, Sendable {
     case .box, .splitPanel, .tabs, .stepper, .summaryList, .disclosure, .modal, .scrollArea:
       return .layout
     case .heading, .markdown, .metric, .badge, .sparkline, .callout, .progress, .skeleton,
-      .fact, .labelValueRow, .link, .image, .list, .toast, .codeBlock, .math, .drawing:
+      .icon, .fact, .labelValueRow, .link, .image, .list, .toast, .codeBlock, .math, .drawing:
       return .display
     case .form, .filters, .button, .fileUpload, .select:
       return .input

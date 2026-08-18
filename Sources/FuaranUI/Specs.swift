@@ -160,10 +160,45 @@ public struct DrawStyle: Equatable, Sendable {
   public var fontFamily: String?
   /// Phase 642 — keyed mark identity (omitted-when-absent on the wire).
   public var markId: String?
+  /// Label rotation in DEGREES, clockwise-positive about the label's own anchor
+  /// point — the wire's `rotate(θ x y)` semantics, taken as-authored (no host
+  /// re-rounds on decode). Applies only to `Shape.label`; ignored elsewhere,
+  /// exactly like the rest of the text-only cluster above.
+  public var rotation: Double?
+  /// The mark's hover-readable readout. The one `DrawStyle` field that applies
+  /// to EVERY shape rather than only to `label` — the marks a reader reaches for
+  /// are the bars, wedges and points. An explicitly EMPTY tip is a present value
+  /// and a distinct wire shape from an absent one.
+  public var tip: TextSource?
+
+  /// The memberwise initialiser, made public deliberately: the style cascade
+  /// (`inheritedDrawStyle`) rebuilds a style field by field rather than copying
+  /// and patching, so that adding a field to this record is a COMPILE ERROR at
+  /// the cascade until someone decides whether it inherits. A copy-and-patch
+  /// would silently leave a new field un-inherited.
+  public init(
+    fill: Binding? = nil, stroke: Binding? = nil, strokeWidth: Binding? = nil,
+    opacity: Binding? = nil, textAnchor: TextAnchor? = nil, fontSize: Double? = nil,
+    emphasis: Emphasis? = nil, fontFamily: String? = nil, markId: String? = nil,
+    rotation: Double? = nil, tip: TextSource? = nil
+  ) {
+    self.fill = fill
+    self.stroke = stroke
+    self.strokeWidth = strokeWidth
+    self.opacity = opacity
+    self.textAnchor = textAnchor
+    self.fontSize = fontSize
+    self.emphasis = emphasis
+    self.fontFamily = fontFamily
+    self.markId = markId
+    self.rotation = rotation
+    self.tip = tip
+  }
 
   public static let empty = DrawStyle(
     fill: nil, stroke: nil, strokeWidth: nil, opacity: nil,
-    textAnchor: nil, fontSize: nil, emphasis: nil, fontFamily: nil, markId: nil)
+    textAnchor: nil, fontSize: nil, emphasis: nil, fontFamily: nil, markId: nil,
+    rotation: nil, tip: nil)
 }
 
 public indirect enum CurveCommand: Equatable, Sendable {

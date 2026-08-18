@@ -219,7 +219,13 @@ extension Decode {
       emphasis: emphasis,
       fontFamily: try optString(path, f, "fontFamily"),
       // Phase 642 — keyed mark identity; omitted-when-None.
-      markId: try optString(path, f, "markId"))
+      markId: try optString(path, f, "markId"),
+      // Label rotation (degrees, clockwise) and the per-mark hover readout. Both
+      // omitted-when-None on the wire; both taken as-authored — the projection
+      // re-rounds neither, so a decoded drawing carries exactly the numbers the
+      // emitter wrote.
+      rotation: try optFloat(path, f, "rotation"),
+      tip: try optTextSource(path, f, "tip"))
   }
 
   static func styleOrDefault(_ path: String, _ f: [String: JSON]) throws -> DrawStyle {
@@ -630,7 +636,8 @@ extension Decode {
   ) throws {
     for (name, replacement) in canonical where f[name] != nil {
       throw wrongType(
-        "\(path).\(name)", "the canonical form instead - '\(name)' is a near miss; use \(replacement)")
+        "\(path).\(name)",
+        "the canonical form instead - '\(name)' is a near miss; use \(replacement)")
     }
   }
 

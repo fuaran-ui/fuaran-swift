@@ -574,28 +574,45 @@
     }
   }
 
+  /// The Drawing arm — the geometry itself lives in `DrawingCanvas.swift`; this
+  /// is its frame and, more consequentially, its accessible identity.
+  ///
+  /// **The root summary.** A drawing is ONE announced graphic, not a container
+  /// an assistive technology walks into: `children: .ignore` plus a composed
+  /// name is the SwiftUI form of the web root's `role="img"` + `aria-label`, and
+  /// it is what makes a chart's generated summary — kind, series, extent, peak —
+  /// the thing a reader actually hears. The composition rule (title first,
+  /// terminated, then the description) is not written here; it is
+  /// `drawingAccessibilityName`, in the pure lowering, so the announced string
+  /// is asserted on every platform rather than only where SwiftUI compiles.
+  ///
+  /// The visible `<title>` is ALSO drawn as a heading, exactly as the web
+  /// surface shows it, which is why it appears twice in the source and once to
+  /// each reader: sighted readers see the heading, a screen reader hears the
+  /// composed name and never reaches the heading behind the ignored children.
   private struct RenderDrawing: View {
     let k: DrawingSpec
     let ctx: BindingContext
-    var body: some View {
-      let labels = labelTexts
-      VStack(alignment: .leading, spacing: 2) {
-        if let title = k.title {
-          Text(ctx.resolveText(title)).font(.system(size: 14, weight: .semibold))
-        }
-        Text("Drawing · \(k.shapes.count) shape(s)").font(.caption).foregroundStyle(.secondary)
-        ForEach(labels.indices, id: \.self) { i in Text(labels[i]).font(.caption) }
-      }
-      .padding(8)
-      .background(Color.gray.opacity(0.06))
-      .clipShape(RoundedRectangle(cornerRadius: 6))
-    }
 
-    private var labelTexts: [String] {
-      k.shapes.compactMap { shape in
-        if case .label(_, _, let text, _) = shape { return ctx.resolveText(text) }
-        return nil
+    var body: some View {
+      let name = drawingAccessibilityName(
+        title: k.title.map(ctx.resolveText), description: k.description.map(ctx.resolveText))
+
+      let framed =
+        VStack(alignment: .leading, spacing: 4) {
+          if let title = k.title {
+            Text(ctx.resolveText(title)).font(.system(size: 14, weight: .semibold))
+          }
+          FuaranDrawing(k, ctx)
+        }
+        .padding(8)
+        .background(Color.gray.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+
+      if let name {
+        return AnyView(framed.accessibilityElement(children: .ignore).accessibilityLabel(name))
       }
+      return AnyView(framed)
     }
   }
 

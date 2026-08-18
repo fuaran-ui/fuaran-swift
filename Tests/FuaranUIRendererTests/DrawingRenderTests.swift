@@ -202,6 +202,45 @@ import XCTest
       // quarter-turn carries a run that was lying to its left.
       XCTAssertGreaterThan(
         Double(turned.y), Double(Self.pivot.y) + 10, "turned ink \(turned)")
+
+      // THE NEGATIVE CONTROL, run every time rather than demonstrated once by
+      // breaking the arm. The same word, hung off the same anchor, but turned
+      // about the TEXT BOX's own centre — the construction this arm deliberately
+      // does not use. Its ink does not move at all, so `travelled` is precisely
+      // the measurement that separates the two, and the assertion above is not
+      // one a wrong pivot could have passed.
+      let wrongUpright = try opaqueCentroid(centrePivotedLabelProbe(rotation: 0))
+      let wrongTurned = try opaqueCentroid(centrePivotedLabelProbe(rotation: -90))
+      let wrongTravelled =
+        ((Double(wrongTurned.x - wrongUpright.x)) * (Double(wrongTurned.x - wrongUpright.x))
+        + (Double(wrongTurned.y - wrongUpright.y)) * (Double(wrongTurned.y - wrongUpright.y)))
+        .squareRoot()
+      XCTAssertLessThan(
+        wrongTravelled, 5,
+        "the control did not behave as a centre-pivoted label — the discrimination this test "
+          + "rests on is not established (\(wrongUpright) → \(wrongTurned))")
+      XCTAssertGreaterThan(
+        travelled, wrongTravelled + 10,
+        "the arm's pivot is indistinguishable from a centre pivot at this scale")
+    }
+
+    /// The wrong construction, built deliberately: the glyph run hung off the
+    /// same anchor but turned about its own centre. Only ever rendered as the
+    /// negative control above.
+    private func centrePivotedLabelProbe(rotation: Double) -> some View {
+      ZStack(alignment: .topLeading) {
+        Color.clear
+          .frame(width: 0, height: 0)
+          .overlay(alignment: Alignment(horizontal: .trailing, vertical: .lastTextBaseline)) {
+            Text("AVERAGE")
+              .font(.system(size: 16))
+              .foregroundStyle(Color.black)
+              .fixedSize()
+              .rotationEffect(.degrees(rotation), anchor: .center)
+          }
+          .position(x: Self.pivot.x, y: Self.pivot.y)
+      }
+      .frame(width: Self.side, height: Self.side, alignment: .topLeading)
     }
 
     // ── The arm itself builds, for every shape in the corpus fixtures ────────

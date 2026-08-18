@@ -102,6 +102,33 @@ public enum LinkProtection: String, CaseIterable, Equatable, Sendable {
   case email = "email"
 }
 
+/// The rendered size of a standalone `Icon`. Omitted on the wire at `Medium`.
+public enum IconSize: String, CaseIterable, Equatable, Sendable {
+  case small = "Small"
+  case medium = "Medium"
+  case large = "Large"
+}
+
+/// The unit a `Duration` cell format's raw value counts in.
+public enum DurationUnit: String, CaseIterable, Equatable, Sendable {
+  case seconds = "Seconds"
+  case minutes = "Minutes"
+  case hours = "Hours"
+}
+
+/// How a `Duration` renders: `1h 5m` / `01:05:00` / `1 hour 5 minutes`.
+public enum DurationStyle: String, CaseIterable, Equatable, Sendable {
+  case compact = "Compact"
+  case clock = "Clock"
+  case long = "Long"
+}
+
+/// A sort direction. Lower-case on the wire, like `LinkProtection`.
+public enum SortDirection: String, CaseIterable, Equatable, Sendable {
+  case asc = "asc"
+  case desc = "desc"
+}
+
 public enum MathDisplay: String, CaseIterable, Equatable, Sendable {
   case inline = "Inline"
   case block = "Block"

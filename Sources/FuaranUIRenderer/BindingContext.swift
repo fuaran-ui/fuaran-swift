@@ -68,6 +68,10 @@ public struct BindingContext: Sendable {
     case .filter(_, let defaultValue): return defaultValue.map(flatten) ?? ""
     case .selection(_, let defaultValue, _): return defaultValue.map(flatten) ?? ""
     case .computed: return ""
+    // The host clock supplies the instant. The render floor has no clock seam of its own
+    // (that is host work, like `format`'s number/date rendering below), so it resolves
+    // empty rather than inventing a time that would then differ from the host's.
+    case .now: return ""
     case .i18n(let key, _): return key
     case .local(_, let initialFrom): return resolve(initialFrom)
     case .format(_, _, let source):
@@ -169,6 +173,38 @@ func projectRowFieldString(_ row: JSON, _ field: String) -> String {
 /// Apply a column's `CellFormat` to a projected value, for the cell kinds that
 /// display a formatted datum. Unknown / structural formats fall through to the
 /// canonical text rather than inventing a rendering.
+/// Render an elapsed duration. `unit` says what the raw number counts; `style` picks the
+/// spelling: `1h 5m` / `01:05:00` / `1 hour 5 minutes`.
+func formatDuration(_ raw: Double, _ unit: DurationUnit, _ style: DurationStyle) -> String {
+  let seconds: Double =
+    switch unit {
+    case .seconds: raw
+    case .minutes: raw * 60
+    case .hours: raw * 3600
+    }
+  let total = Int(seconds.rounded())
+  let h = total / 3600
+  let m = (total % 3600) / 60
+  let s = total % 60
+  switch style {
+  case .clock:
+    return String(format: "%02d:%02d:%02d", h, m, s)
+  case .compact:
+    var parts: [String] = []
+    if h > 0 { parts.append("\(h)h") }
+    if m > 0 { parts.append("\(m)m") }
+    if s > 0 || parts.isEmpty { parts.append("\(s)s") }
+    return parts.joined(separator: " ")
+  case .long:
+    func plural(_ n: Int, _ word: String) -> String { "\(n) \(word)\(n == 1 ? "" : "s")" }
+    var parts: [String] = []
+    if h > 0 { parts.append(plural(h, "hour")) }
+    if m > 0 { parts.append(plural(m, "minute")) }
+    if s > 0 || parts.isEmpty { parts.append(plural(s, "second")) }
+    return parts.joined(separator: " ")
+  }
+}
+
 func formatCellValue(_ text: String, _ format: CellFormat) -> String {
   guard let n = Double(text) else { return text }
   switch format {
@@ -177,6 +213,12 @@ func formatCellValue(_ text: String, _ format: CellFormat) -> String {
   case .currency(let code): return "\(code) \(String(format: "%.2f", n))"
   case .percent(let decimals): return String(format: "%.\(decimals ?? 0)f%%", n * 100)
   case .significantDigits(let digits): return String(format: "%.\(digits)g", n)
+  case .duration(let unit, let style): return formatDuration(n, unit, style)
+  // Relative time needs a REFERENCE instant to be relative to, which is host state
+  // (`Binding.now`), not something this pure formatter holds. Rendering the raw count
+  // with its unit is honest; inventing "3 minutes ago" against the render-floor clock
+  // would disagree with the host the moment one exists.
+  case .relativeTime(let unit): return "\(text) \(unit.rawValue.lowercased())"
   }
 }
 

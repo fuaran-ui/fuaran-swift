@@ -55,7 +55,7 @@ import XCTest
       let session = InteractionFakeSession(md("x"))
       let host = try await FuaranHost.start(session: session)
 
-      await host.dispatch(.setState(key: "name", value: .string("Ada")))
+      await host.dispatch(.setState(key: "name", value: .string("Ada"), valueFrom: nil))
       let writes = await session.writes
       XCTAssertTrue(writes.contains { $0.0 == "name" && $0.1.contains("Ada") }, "saw \(writes)")
       XCTAssertNil(host.lastError)

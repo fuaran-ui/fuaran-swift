@@ -94,6 +94,16 @@ public struct LinkSpec: Equatable, Sendable {
   public var protection: LinkProtection?
 }
 
+/// A standalone glyph. `icon` is a NAME; the embedding app owns the name -> glyph
+/// mapping, so this projection carries the name rather than resolving it.
+public struct IconSpec: Equatable, Sendable {
+  public var icon: String
+  /// Absent => decorative (the a11y layer hides it); present => a labelled image role.
+  public var label: String?
+  public var size: IconSize
+  public var tone: ToneVariant
+}
+
 public struct ImageSpec: Equatable, Sendable {
   public var alt: TextSource
   public var src: Binding
@@ -191,6 +201,8 @@ public enum FormFieldKind: Equatable, Sendable {
   case text(value: Binding, onChange: Closure?)
   case number(value: Binding, onChange: Closure?)
   case checkbox(value: Binding, onToggle: Closure?)
+  /// The switch affordance: the same boolean slot as `checkbox`, a different control.
+  case toggle(value: Binding, onToggle: Closure?)
   case choice(options: Binding, value: Binding, onChange: Closure?)
   /// 0.2.0 — the dual-thumb numeric range (absorbed the retired RangeFilter).
   case range(value: Binding, min: Double?, max: Double?, step: Double?, onChange: Closure?)
@@ -303,6 +315,15 @@ public struct ColumnErased: Equatable, Sendable {
 public struct StaticRows: Equatable, Sendable {
   public var headers: [TextSource]
   public var rows: [[TextSource]]
+  public var defaultSort: DefaultSort?
+  public var sortable: Bool?
+}
+
+/// An initial sort: a zero-based header INDEX (the schema pins `minimum: 0`, so a
+/// negative is malformed rather than a from-the-end convention) plus a direction.
+public struct DefaultSort: Equatable, Sendable {
+  public var column: Int
+  public var direction: SortDirection
 }
 
 public struct GridSpec: Equatable, Sendable {
@@ -313,6 +334,17 @@ public struct GridSpec: Equatable, Sendable {
   public var rowKey: Closure?
   public var rowKeyField: String?
   public var staticRows: StaticRows?
+  /// The sort / page / edit POSITIONS are addressed through state keys rather than
+  /// literal values, so a control can move them; `defaultSort` and `pageSize` are the
+  /// initial configuration. Decoded faithfully because this is a view of the wire -
+  /// dropping a declaration would misreport the tree. Acting on them is the renderer's
+  /// business, not the decoder's.
+  public var sortStateKey: String?
+  public var pageStateKey: String?
+  public var editStateKey: String?
+  /// Rows per page. The schema pins `minimum: 1` - a zero page size paginates nothing.
+  public var pageSize: Int?
+  public var defaultSort: DefaultSort?
 }
 
 public struct ChartSpec: Equatable, Sendable {
@@ -429,10 +461,14 @@ public struct SwitchCase: Equatable, Sendable {
   public var child: Node
 }
 
+/// The declarative selector. The branch follows a state key or - since the widening -
+/// any `Binding`, so a `Selection` makes it follow the clicked row. The schema requires
+/// at least one of the two (`anyOf`); `on` is the more specific declaration and wins.
 public struct SwitchSpec: Equatable, Sendable {
-  public var stateKey: String
+  public var stateKey: String?
   public var cases: [SwitchCase]
   public var defaultChild: Node
+  public var on: Binding?
 }
 
 public enum HoleValueSpace: Equatable, Sendable {

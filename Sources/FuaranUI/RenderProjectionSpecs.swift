@@ -351,6 +351,10 @@ extension Decode {
     case "Checkbox":
       return .checkbox(
         value: try valueOr(.untyped, ControlValueDefaults.checkbox), onToggle: onToggle)
+    // The switch affordance beside a Checkbox: the same boolean slot, a different control.
+    case "Toggle":
+      return .toggle(
+        value: try valueOr(.untyped, ControlValueDefaults.checkbox), onToggle: onToggle)
     case "Choice":
       return .choice(
         options: try reqBindingSlot(path, f, "options", .options),
@@ -596,6 +600,8 @@ extension Decode {
     let f = try object(path, j)
     // Phase 460 — format/width omitted-when-default. Field aliases: type →
     // kind, header/title → label.
+    try refuseNearMiss(
+      path, f, [("readOnly", "editable: false (readOnly is its inverse)")])
     return ColumnErased(
       format: try optCellFormatDefault(path, f, "format"),
       kind: try cellKindErased("\(path).kind", try reqAliased(path, f, "kind", ["type"])),
@@ -603,6 +609,59 @@ extension Decode {
       width: try optColumnWidthDefault(path, f, "width"),
       value: optClosure(f, "value"),
       field: try optString(path, f, "field"))
+  }
+
+  /// The ENUMERATED near-miss refusal (WIRE_FORMAT 3.2 "Near-miss names are refused,
+  /// not ignored").
+  ///
+  /// Rule 2 tolerates an unknown key, which is right for a field a future profile may
+  /// add. It is wrong for a name that is a near miss of one that EXISTS: the tree then
+  /// decodes, validates and renders while the declaration does nothing, so the emitter
+  /// cannot tell a spelling mistake from a declaration that worked - a fake affordance
+  /// arriving through a typo. `schema.json` forbids each with `not: { required: [...] }`,
+  /// so the two artefacts agree.
+  ///
+  /// Refused rather than ALIASED, deliberately: these are not synonyms. `currentPage`
+  /// carries a literal page number the vocabulary cannot express at all, and `readOnly`
+  /// is the INVERSE of `editable` - an alias that inverts a boolean makes a read-only
+  /// column editable when it guesses wrong.
+  static func refuseNearMiss(
+    _ path: String, _ f: [String: JSON], _ canonical: [(String, String)]
+  ) throws {
+    for (name, replacement) in canonical where f[name] != nil {
+      throw wrongType(
+        "\(path).\(name)", "the canonical form instead - '\(name)' is a near miss; use \(replacement)")
+    }
+  }
+
+  /// An integer slot with a schema-pinned lower bound (`minimum`). Below it is WRONG_TYPE.
+  static func intAtLeast(_ path: String, _ j: JSON, _ min: Int) throws -> Int {
+    let n = try int(path, j)
+    if n < min { throw wrongType(path, "an integer >= \(min), got \(n)") }
+    return n
+  }
+
+  /// An initial sort. Both members are closed: `column` is a zero-based header INDEX
+  /// (`minimum: 0`) and `direction` is the `asc | desc` pair, which default-denies.
+  static func defaultSort(_ path: String, _ j: JSON) throws -> DefaultSort {
+    let f = try object(path, j)
+    return DefaultSort(
+      column: try intAtLeast("\(path).column", try req(path, f, "column"), 0),
+      direction: try bareEnum(
+        "\(path).direction", try req(path, f, "direction"), "SortDirection"))
+  }
+
+  /// A standalone glyph. `size` and `tone` are omitted-when-default (§3.6), so an absent
+  /// slot restores the language default rather than failing.
+  static func iconSpec(_ path: String, _ j: JSON) throws -> IconSpec {
+    let f = try object(path, j)
+    var size: IconSize = .medium
+    if let v = f["size"] { size = try bareEnum("\(path).size", v, "IconSize") }
+    var tone: ToneVariant = .default
+    if let v = f["tone"] { tone = try toneVariant("\(path).tone", v) }
+    return IconSpec(
+      icon: try reqString(path, f, "icon"), label: try optString(path, f, "label"),
+      size: size, tone: tone)
   }
 
   static func staticRows(_ path: String, _ j: JSON) throws -> StaticRows {
@@ -614,15 +673,40 @@ extension Decode {
         try array("\(path).rows[\(i)]", rowJ).enumerated()
           .map { try textSource("\(path).rows[\(i)][\($0.0)]", $0.1) }
       }
-    return StaticRows(headers: headers, rows: rows)
+    var sortV: DefaultSort? = nil
+    if let v = f["defaultSort"] { sortV = try defaultSort("\(path).defaultSort", v) }
+    return StaticRows(
+      headers: headers, rows: rows, defaultSort: sortV,
+      sortable: try optBool(path, f, "sortable"))
   }
 
   static func gridSpec(_ path: String, _ j: JSON) throws -> GridSpec {
     let f = try object(path, j)
+    let pageCanonical = "pageStateKey (the position lives in State as a {\"page\": N} slot)"
+    try refuseNearMiss(
+      path, f,
+      [
+        ("currentPage", pageCanonical),
+        ("page", pageCanonical),
+        ("pageIndex", pageCanonical),
+        (
+          "sortable",
+          "sortStateKey + a per-column `sortable` (grid-wide `sortable` is the staticRows spelling)"
+        ),
+        ("onEdit", "editStateKey"),
+        ("behaviour", "the sibling behaviour fields; grid behaviour is not a nested record"),
+        ("behavior", "the sibling behaviour fields; grid behaviour is not a nested record"),
+      ])
     let columns = try array("\(path).columns", try req(path, f, "columns")).enumerated()
       .map { try columnErased("\(path).columns[\($0.0)]", $0.1) }
     var staticRowsV: StaticRows? = nil
     if let v = f["staticRows"] { staticRowsV = try staticRows("\(path).staticRows", v) }
+    var gridSortV: DefaultSort? = nil
+    if let v = f["defaultSort"] { gridSortV = try defaultSort("\(path).defaultSort", v) }
+    var pageSizeV: Int? = nil
+    // `minimum: 1` - a page size of zero paginates nothing, so it is malformed rather
+    // than a degenerate configuration the renderer should try to honour.
+    if let v = f["pageSize"] { pageSizeV = try intAtLeast("\(path).pageSize", v, 1) }
     return GridSpec(
       columns: columns,
       // 0.2.0 — omitted-when-default (false).
@@ -632,7 +716,12 @@ extension Decode {
       onRowClick: optClosure(f, "onRowClick"),
       rowKey: optClosure(f, "rowKey"),
       rowKeyField: try optString(path, f, "rowKeyField"),
-      staticRows: staticRowsV)
+      staticRows: staticRowsV,
+      sortStateKey: try optString(path, f, "sortStateKey"),
+      pageStateKey: try optString(path, f, "pageStateKey"),
+      editStateKey: try optString(path, f, "editStateKey"),
+      pageSize: pageSizeV,
+      defaultSort: gridSortV)
   }
 
   static func chartSpec(_ path: String, _ j: JSON) throws -> ChartSpec {
@@ -959,6 +1048,7 @@ extension Decode {
     case "Skeleton": return .skeleton(try skeletonSpec(path, j))
     case "Fact": return .fact(try factSpec(path, j))
     case "LabelValueRow": return .labelValueRow(try labelValueRowSpec(path, j))
+    case "Icon": return .icon(try iconSpec(path, j))
     case "Link": return .link(try linkSpec(path, j))
     case "Image": return .image(try imageSpec(path, j))
     case "List": return .list(try listSpec(path, j))
@@ -984,7 +1074,9 @@ extension Decode {
       return .dataGrid(
         GridSpec(
           columns: [], editable: false, source: .staticValue(.ast(.string(OPAQUE))),
-          onRowClick: nil, rowKey: nil, rowKeyField: nil, staticRows: rows))
+          onRowClick: nil, rowKey: nil, rowKeyField: nil, staticRows: rows,
+          sortStateKey: nil, pageStateKey: nil, editStateKey: nil, pageSize: nil,
+          defaultSort: nil))
     case "Map": return .map(try mapSpec(path, j))
     // Structural.
     case "Custom":
@@ -1016,11 +1108,21 @@ extension Decode {
             child: try node(
               "\(path).cases[\(i)].child", try req("\(path).cases[\(i)]", cf, "child")))
         }
+      // The selector widened: `on` takes any Binding (a `Selection` makes the branch
+      // follow the clicked row), so `stateKey` is no longer required on its own. The
+      // schema states it as `anyOf: [required stateKey, required on]` - at least one, and
+      // the refusal below is what makes a Switch carrying NEITHER a decode error rather
+      // than a node that silently always renders its default.
+      let switchKey = try optString(path, f, "stateKey")
+      var switchOn: Binding? = nil
+      if let v = f["on"] { switchOn = try binding("\(path).on", v) }
+      if switchKey == nil && switchOn == nil { throw missing(path, "stateKey") }
       return .switchKind(
         SwitchSpec(
-          stateKey: try reqString(path, f, "stateKey"),
+          stateKey: switchKey,
           cases: cases,
-          defaultChild: try node("\(path).default", try req(path, f, "default"))))
+          defaultChild: try node("\(path).default", try req(path, f, "default")),
+          on: switchOn))
     case "FragmentDecl":
       var holes: [HoleDecl] = []
       if let v = f["holes"] {

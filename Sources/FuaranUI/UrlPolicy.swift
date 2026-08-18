@@ -94,23 +94,78 @@ public enum FuaranUrlPolicy {
   /// (`\\host`, `/\host`), which several URL parsers normalise to `//` and which
   /// therefore smuggles a protocol-relative URL past a `//` check.
   public static func sanitize(_ url: String) -> String? {
-    let trimmed = url.trimmingASCIIWhitespace()
+    let trimmed = normalisedForFloor(url)
     if trimmed.isEmpty { return trimmed }
-    if trimmed.contains("\\") { return nil }
-    if trimmed.hasPrefix("//") { return nil }
+    if isProtocolRelative(trimmed) { return nil }
     guard let scheme = scheme(of: trimmed) else { return trimmed }
     return allowedSchemes.contains(scheme) ? trimmed : nil
+  }
+
+  /// WIRE_FORMAT §19 rule 1 — normalise a URL string exactly as the WHATWG URL
+  /// Standard's basic URL parser does BEFORE it parses anything, ASCII-exact, in
+  /// this order:
+  ///
+  ///   1. remove leading and trailing C0-control-or-space — ALL of U+0000–U+0020,
+  ///      not merely the whitespace subset;
+  ///   2. remove every U+0009 / U+000A / U+000D from anywhere in what remains.
+  ///
+  /// Deliberately NOT a stdlib trim. A native trim answers a different question in
+  /// every language — Python's `strip` also removes U+001C–U+001F where Swift, JS,
+  /// .NET, Go and Rust do not — and all of them remove non-ASCII whitespace
+  /// (U+00A0, U+2028, …) that the parser KEEPS. The floor's whole purpose is that a
+  /// tree vetted on one host is safe on another, so the normalisation has to be
+  /// defined by the parser that will actually consume the string rather than by the
+  /// host's standard library.
+  ///
+  /// Step 2 is those three scalars ONLY: the parser removes U+000B and U+000C at the
+  /// EDGES (step 1) and KEEPS them in the interior, so `/<VT>/host/x` is an ordinary
+  /// same-origin path and must stay one.
+  ///
+  /// The normalised form is also what is EMITTED on acceptance, so an accepted URL
+  /// carrying an interior tab loses it — which is what the browser would have parsed
+  /// anyway. Emitting the raw string instead would hand the embedding app a value the
+  /// floor never actually inspected.
+  static func normalisedForFloor(_ url: String) -> String {
+    var scalars = Array(url.unicodeScalars)
+    while let first = scalars.first, first.value <= 0x20 { scalars.removeFirst() }
+    while let last = scalars.last, last.value <= 0x20 { scalars.removeLast() }
+    scalars.removeAll { $0.value == 0x09 || $0.value == 0x0A || $0.value == 0x0D }
+    return String(String.UnicodeScalarView(scalars))
+  }
+
+  /// A protocol-relative URL: `//host/path`, plus the backslash forms browsers
+  /// normalise to it. WHATWG URL parsing treats `\` as `/` for special schemes, so
+  /// `\\host`, `/\host` and `\/host` all resolve exactly as `//host` does.
+  ///
+  /// These carry no scheme, so the schemeless branch of `sanitize` would otherwise
+  /// admit them — but the resolver supplies the CURRENT origin's scheme and lands
+  /// OFF-ORIGIN, defeating the same-origin intent that makes a schemeless URL safe
+  /// in the first place.
+  ///
+  /// The test is POSITIONAL — the first two characters — rather than "contains a
+  /// backslash". That distinction is the whole finding: a blanket contains-check
+  /// refuses `\host` (a single leading backslash, which the parser reads as the
+  /// same-origin path `/host`), while a single interior tab slips `/<TAB>/host`
+  /// past a `hasPrefix("//")` check entirely. Normalise first, then test position,
+  /// and both come out right.
+  static func isProtocolRelative(_ url: String) -> Bool {
+    let s = Array(url.unicodeScalars)
+    guard s.count >= 2 else { return false }
+    let a = s[0]
+    let b = s[1]
+    return (a == "/" || a == "\\") && (b == "/" || b == "\\")
   }
 
   /// `sanitize`, with the refusal reason retained for the `SanitizedUrl` cases.
   static func classify(_ url: String) -> SanitizedUrl {
     if let ok = sanitize(url) { return .allowed(ok) }
-    let trimmed = url.trimmingASCIIWhitespace()
-    if trimmed.contains("\\") {
-      return .rejected(raw: url, reason: "backslash forms are refused (they normalise to '//')")
-    }
-    if trimmed.hasPrefix("//") {
-      return .rejected(raw: url, reason: "protocol-relative '//' URLs are refused")
+    let trimmed = normalisedForFloor(url)
+    if isProtocolRelative(trimmed) {
+      return .rejected(
+        raw: url,
+        reason:
+          "protocol-relative URLs are refused — '\(trimmed)' resolves off-origin (the backslash forms normalise to '//' too)"
+      )
     }
     let scheme = self.scheme(of: trimmed) ?? "<none>"
     if deniedSchemes.contains(scheme) {

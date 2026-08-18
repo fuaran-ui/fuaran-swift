@@ -85,6 +85,7 @@ public indirect enum NodeKind: Equatable, Sendable {
   case callout(CalloutSpec)
   case progress(ProgressSpec)
   case skeleton(SkeletonSpec)
+  case icon(IconSpec)
   case fact(FactSpec)
   case labelValueRow(LabelValueRowSpec)
   case link(LinkSpec)
@@ -131,6 +132,7 @@ public indirect enum NodeKind: Equatable, Sendable {
     case .callout: return "Callout"
     case .progress: return "Progress"
     case .skeleton: return "Skeleton"
+    case .icon: return "Icon"
     case .fact: return "Fact"
     case .labelValueRow: return "LabelValueRow"
     case .link: return "Link"

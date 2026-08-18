@@ -192,4 +192,118 @@ final class CorpusTests: XCTestCase {
     )
     print("CORPUS REJECT LEG: \(rejects.count) fixtures refused with the canonical code + path")
   }
+
+  /// The SANITIZATION family (`WIRE_FORMAT.md` §19 + §22) — semantic invariants.
+  ///
+  /// Unlike every other family here this one is NOT byte-parity: the markup a host
+  /// emits around a URL differs legitimately between an F# React renderer, a Go
+  /// static-HTML emitter and this native projection, so comparing bytes would pin
+  /// accidents rather than the contract. The family states invariants instead, and
+  /// each case carries the URL parser's own verdict (`off-origin` / `same-origin` /
+  /// `scheme-refused`), so a "must reject this" claim is backed by what a real
+  /// parser does rather than by a reading of the specification.
+  ///
+  /// ONE group applies to this surface, and the reasons the others do not are
+  /// RECORDED rather than left to inference:
+  ///
+  ///  - `url-floor` (§19) — APPLICABLE and asserted. `Link.href`, `Image.src` and
+  ///    `Navigate.route` all reach the embedding app, which may hand one to
+  ///    `UIApplication.open` or a web view it adds later, so the scheme floor is
+  ///    this surface's real exposure.
+  ///  - `markdown-body`, `text-source` (§22) — NOT APPLICABLE. There is no markup
+  ///    emission and no HTML-parsing attributed-string path anywhere in this
+  ///    projection: text reaches a SwiftUI `Text` as CONTENT, so there is no markup
+  ///    for a payload to break out of. A structural property of rendering a decoded
+  ///    tree into native views, not a gap.
+  ///  - `extra-attributes` (§22) — NOT APPLICABLE. The `ExtraAttributes` seam does
+  ///    not exist on a decoded tree here, and every attribute this renderer sets is
+  ///    renderer-controlled. (The same declaration `fuaran-go` makes, for the same
+  ///    reason.)
+  ///
+  /// The CLAIMED-GROUPS GUARD is the load-bearing part. Without it a group added to
+  /// the corpus later would read as covered while being silently untested — the exact
+  /// shape §22.2 refuses — so a group this leg neither runs nor names as
+  /// not-applicable FAILS.
+  func testSanitizationFamilyInvariants() throws {
+    guard let corpus = Self.corpusDir() else {
+      throw XCTSkip("wire-format-fixtures corpus not found — standalone checkout; skipping.")
+    }
+    let notApplicable = [
+      "markdown-body":
+        "no markup emission and no HTML-parsing text path — text renders as content",
+      "text-source":
+        "no markup emission and no HTML-parsing text path — text renders as content",
+      "extra-attributes": "the ExtraAttributes seam does not exist on a decoded tree here",
+    ]
+
+    let manifestURL =
+      corpus
+      .appendingPathComponent("sanitization")
+      .appendingPathComponent("manifest.json")
+    let text = try String(contentsOf: manifestURL, encoding: .utf8)
+    guard case .object(let root) = try JSON.parse(text),
+      case .array(let groups)? = root["groups"]
+    else {
+      return XCTFail("sanitization/manifest.json carries no `groups` array")
+    }
+
+    var urlFloorCases = 0
+    var failures: [String] = []
+    for g in groups {
+      guard case .object(let group) = g, case .string(let gid)? = group["id"] else { continue }
+      guard gid == "url-floor" else {
+        guard let reason = notApplicable[gid] else {
+          return XCTFail(
+            "sanitization group '\(gid)' is neither run nor declared not-applicable — it would read as covered while being untested"
+          )
+        }
+        // Logged, not silent: a reader sees WHY the group did not execute rather than
+        // inferring it from an absence.
+        print("sanitization/\(gid): NOT APPLICABLE — \(reason)")
+        continue
+      }
+      guard case .array(let cases)? = group["cases"] else {
+        return XCTFail("the sanitization url-floor group carries no `cases` array")
+      }
+      urlFloorCases = cases.count
+      for c in cases {
+        guard case .object(let kase) = c,
+          case .string(let id)? = kase["id"],
+          case .string(let input)? = kase["input"],
+          case .string(let invariant)? = kase["invariant"]
+        else { continue }
+        var expected: String? = nil
+        if case .string(let e)? = kase["expected"] { expected = e }
+        let got = FuaranUrlPolicy.sanitize(input)
+        switch invariant {
+        case "reject":
+          if let got {
+            failures.append("\(id): the floor ACCEPTED \(input.debugDescription) as \(got.debugDescription)")
+          }
+        case "accept":
+          guard let got else {
+            failures.append("\(id): the floor REJECTED \(input.debugDescription), which resolves same-origin")
+            continue
+          }
+          // The emitted form is the §19 rule-1 normalised one, which is NOT always the
+          // input: an accepted URL carrying an interior tab loses it, because that is
+          // what a parser would have read anyway.
+          if let expected, got != expected {
+            failures.append(
+              "\(id): expected the normalised form \(expected.debugDescription), got \(got.debugDescription)"
+            )
+          }
+        default:
+          failures.append("\(id): unknown invariant '\(invariant)'")
+        }
+      }
+    }
+
+    XCTAssertGreaterThan(urlFloorCases, 0, "the sanitization url-floor group enumerated ZERO cases")
+    XCTAssertTrue(
+      failures.isEmpty,
+      "\(failures.count) of \(urlFloorCases) url-floor cases failed:\n"
+        + failures.joined(separator: "\n"))
+    print("SANITIZATION url-floor: \(urlFloorCases) cases asserted against the URL floor")
+  }
 }

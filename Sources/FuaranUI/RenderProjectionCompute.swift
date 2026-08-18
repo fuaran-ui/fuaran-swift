@@ -15,8 +15,25 @@ extension Decode {
 
   // ── DataSource ────────────────────────────────────────────────────────────
 
+  /// A `Transform`'s embedded source slot.
+  ///
+  /// Three lenient shapes reach this decoder before the columnar one (WIRE_FORMAT 3.6 +
+  /// the Phase 815/822 leniency corpus), because every OTHER source position on the wire
+  /// takes a `Binding` and models generalise from that:
+  ///
+  ///  * a binding ENVELOPE (`State` / `Static` / `Bound`) wrapped round the table -
+  ///    unwrapped to its payload before the columnar decode (initial-snapshot semantics);
+  ///  * an envelope carrying NO payload member - REFUSED, because there is nothing to
+  ///    unwrap to, so the transform has no data and the grid would render empty with no
+  ///    indication that a source was ever declared;
+  ///  * a ROW-MAJOR array of records - the shape every JSON API returns - pivoted to the
+  ///    columnar form the algebra evaluates over.
   static func dataSource(_ path: String, _ j: JSON) throws -> DataSource {
-    let f = try object(path, j)
+    let unwrapped = try unwrapSourceEnvelope(path, j)
+    if case .array(let rows) = unwrapped {
+      return try rowMajorSource(path, rows)
+    }
+    let f = try object(path, unwrapped)
     // Lenient-ingest (Core Phase 88): `schema` may be omitted on an EMBEDDED
     // source (inferred per column, key order); a `ref` source still requires
     // it. The canonical encoder always emits the explicit schema.
@@ -66,6 +83,69 @@ extension Decode {
   /// column element: a BARE JSON array is the "just the data" shorthand (an
   /// all-present mask is synthesised); a wrapped object carrying `values` but
   /// no `validity` is the same all-present statement.
+  /// Unwrap a binding envelope round a Transform source, or refuse an empty one.
+  static func unwrapSourceEnvelope(_ path: String, _ j: JSON) throws -> JSON {
+    guard case .object(let f) = j, case .string(let tag)? = f["$type"] else { return j }
+    switch tag {
+    case "State":
+      if let v = f["defaultValue"] ?? f["value"] { return v }
+    case "Static":
+      if let v = f["value"] { return v }
+    case "Bound":
+      if let v = f["binding"] { return try unwrapSourceEnvelope(path, v) }
+    default:
+      // Not an envelope this decoder knows: fall through to the ordinary columnar
+      // reader, which reports the real shape problem.
+      return j
+    }
+    throw wrongType(
+      path,
+      "a Transform source envelope with a payload to unwrap to - this \(tag) carries none, so the transform has no data"
+    )
+  }
+
+  /// Pivot a row-major record array into the columnar form. The column set is the UNION
+  /// of the rows' keys sorted by name (matching the schema-inference order used for an
+  /// embedded table), and a key absent from a row reads as null, so a ragged feed widens
+  /// rather than being silently truncated to the first row's shape.
+  static func rowMajorSource(_ path: String, _ rows: [JSON]) throws -> DataSource {
+    var names: [String] = []
+    var seen = Set<String>()
+    for row in rows {
+      guard case .object(let rf) = row else {
+        throw wrongType("\(path)[]", "a row-major source to hold objects")
+      }
+      for k in rf.keys where !seen.contains(k) {
+        seen.insert(k)
+        names.append(k)
+      }
+    }
+    names.sort()
+    if names.isEmpty {
+      throw wrongType(
+        path,
+        "a row-major source with at least one column - an empty feed declares no schema to infer"
+      )
+    }
+    var columnsObj: [String: JSON] = [:]
+    for name in names {
+      let cells: [JSON] = rows.map { row in
+        guard case .object(let rf) = row, let v = rf[name] else { return .null }
+        return v
+      }
+      columnsObj[name] = .array(cells)
+    }
+    let schema = try names.map { name -> SchemaEntry in
+      let (values, _) = try columnParts("\(path).\(name)", columnsObj[name]!)
+      return SchemaEntry(
+        name: name, columnType: try inferColumnType("\(path).\(name)", values))
+    }
+    let columns = try schema.map {
+      try dataColumn(path, columnsObj, $0.name, $0.columnType)
+    }
+    return .embedded(schema: schema, columns: columns)
+  }
+
   static func columnParts(_ path: String, _ col: JSON) throws -> ([JSON], [JSON]) {
     if case .array(let xs) = col {
       return (xs, Array(repeating: JSON.bool(true), count: xs.count))

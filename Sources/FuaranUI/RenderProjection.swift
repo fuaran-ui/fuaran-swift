@@ -522,10 +522,19 @@ extension Decode {
     case "Percent": return .percent(decimals: try optInt(path, f, "decimals"))
     case "SignificantDigits": return .significantDigits(digits: try reqInt(path, f, "digits"))
     case "Date": return .date(format: try reqString(path, f, "format"))
+    case "Duration":
+      return .duration(
+        unit: try bareEnum("\(path).unit", try req(path, f, "unit"), "DurationUnit"),
+        style: try bareEnum("\(path).style", try req(path, f, "style"), "DurationStyle"))
+    case "RelativeTime":
+      return .relativeTime(
+        unit: try bareEnum("\(path).unit", try req(path, f, "unit"), "RelativeTimeUnit"))
     case "Custom": return .custom
     case let o:
       throw unknownCase(
-        path, o, "None | Number | Currency | Percent | SignificantDigits | Date | Custom")
+        path, o,
+        "None | Number | Currency | Percent | SignificantDigits | Date | Duration | RelativeTime | Custom"
+      )
     }
   }
 
@@ -610,6 +619,8 @@ extension Decode {
       dv = (try? slot.parse("\(path).defaultValue", rawDefault)) ?? slot.placeholder()
       return .state(key: key, defaultValue: dv)
     case "Computed": return .computed
+    // The host-furnished instant - no payload; the host clock supplies the value.
+    case "Now": return .now
     case "I18n":
       let key = try reqString(path, f, "key")
       var args: [NamedBinding]? = nil
@@ -740,9 +751,23 @@ extension Decode {
     case "Navigate":
       return .navigate(route: try reqStringAliased(path, f, "route", ["href", "url", "to"]))
     case "SetState":
+      // `oneOf: [required value, required valueFrom]` - a literal payload OR a binding
+      // resolved at dispatch time, never both. Both-present is refused rather than settled
+      // by precedence: the two say different things about where the value comes from, and
+      // silently preferring one hands the emitter a write it did not ask for.
+      let rawValue = f["value"]
+      let rawFrom = f["valueFrom"]
+      if rawValue != nil && rawFrom != nil {
+        throw wrongType(
+          "\(path).valueFrom", "a SetState to carry `value` or `valueFrom`, not both")
+      }
+      if rawValue == nil && rawFrom == nil { throw missing(path, "value") }
+      var setValue: JSON? = nil
+      if let rv = rawValue { setValue = try jval("\(path).value", rv) }
+      var setFrom: Binding? = nil
+      if let rf = rawFrom { setFrom = try binding("\(path).valueFrom", rf) }
       return .setState(
-        key: try reqString(path, f, "key"),
-        value: try jval("\(path).value", try req(path, f, "value")))
+        key: try reqString(path, f, "key"), value: setValue, valueFrom: setFrom)
     case "AiTool":
       return .aiTool(
         toolName: try reqString(path, f, "toolName"),

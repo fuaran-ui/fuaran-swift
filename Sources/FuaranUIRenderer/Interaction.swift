@@ -139,8 +139,13 @@
 
     private func applySessionEffect(_ action: Action) async throws {
       switch action {
-      case .setState(let key, let value):
-        try await session.setState(key: key, valueJSON: jsonToWire(value))
+      // A `value` SetState is wire-complete: the payload is right there. A `valueFrom`
+      // SetState is NOT - resolving the binding needs the render context (a `Selection`
+      // reads the clicked row of a named grid), which this dispatch seam does not carry.
+      // Leaving it unapplied is the honest answer; writing a placeholder would put a
+      // wrong value under a right-looking key.
+      case .setState(let key, let value, _):
+        if let value { try await session.setState(key: key, valueJSON: jsonToWire(value)) }
       case .chain(let actions):
         for a in actions { try await applySessionEffect(a) }
       default:

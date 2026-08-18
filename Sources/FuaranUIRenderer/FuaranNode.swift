@@ -74,6 +74,7 @@
     case .callout(let k): return AnyView(RenderCallout(k: k, ctx: ctx))
     case .progress(let k): return AnyView(RenderProgress(k: k, ctx: ctx))
     case .skeleton(let k): return AnyView(RenderSkeleton(rows: k.rows))
+    case .icon(let k): return AnyView(RenderIcon(k: k, ctx: ctx))
     case .fact(let k): return AnyView(RenderFact(k: k, ctx: ctx))
     case .labelValueRow(let k): return AnyView(RenderLabelValueRow(k: k, ctx: ctx))
     case .link(let k): return AnyView(RenderLink(k: k, ctx: ctx))
@@ -336,9 +337,44 @@
     let k: SwitchSpec
     let ctx: BindingContext
     var body: some View {
-      let current = ctx.resolve(.state(key: k.stateKey, defaultValue: .stringOpt(nil)))
+      // `on` is the more specific declaration and wins where both are present; the
+      // decoder has already refused a Switch carrying neither, so the empty tail is
+      // unreachable rather than a silent default-to-empty.
+      let selector: Binding? =
+        k.on ?? k.stateKey.map { .state(key: $0, defaultValue: .stringOpt(nil)) }
+      let current = selector.map { ctx.resolve($0) } ?? ""
       let chosen = k.cases.first { $0.matchValue == current }?.child ?? k.defaultChild
       FuaranNode(chosen, ctx)
+    }
+  }
+
+  /// The standalone glyph.
+  ///
+  /// The uniform icon-hook contract the HTML hosts also honour: the glyph NAME is the
+  /// payload and the EMBEDDING APP owns the name -> glyph mapping, so this floor must not
+  /// invent a glyph set. What it can do faithfully is carry the name, size and tone
+  /// through and get the accessibility right - the half a placeholder box silently drops.
+  ///
+  /// Accessibility mirrors the HTML hosts exactly: no `label` means DECORATIVE, so the
+  /// node is hidden from the accessibility tree rather than read out as its internal
+  /// glyph name; a labelled icon carries the label. An icon announced as "sparkles" is
+  /// worse than one announced as nothing at all.
+  private struct RenderIcon: View {
+    @Environment(\.fuaranTones) private var tones
+    let k: IconSpec
+    let ctx: BindingContext
+    var body: some View {
+      let size: CGFloat =
+        switch k.size {
+        case .small: 11
+        case .medium: 14
+        case .large: 20
+        }
+      Text(k.icon)
+        .font(.system(size: size))
+        .foregroundStyle(tones.swatch(k.tone).accent)
+        .accessibilityHidden(k.label == nil)
+        .accessibilityLabel(k.label ?? "")
     }
   }
 
@@ -616,6 +652,11 @@
           TextField("", text: .constant(ctx.resolve(value)), axis: .vertical).disabled(true)
         }
       case .checkbox(let value, _):
+        StatefulToggle(label: label, initial: ctx.resolveBool(value), stateKey: stateKeyOf(value))
+      // The switch affordance over the same boolean slot as `checkbox`. SwiftUI's Toggle
+      // IS a switch on this platform, so the two share a control and differ only in the
+      // vocabulary that selected them.
+      case .toggle(let value, _):
         StatefulToggle(label: label, initial: ctx.resolveBool(value), stateKey: stateKeyOf(value))
       case .range(let value, let minV, let maxV, _, _):
         // 0.2.0 dual-thumb range — render floor shows the resolved pair over
@@ -940,7 +981,7 @@
     case .mount(let k): return slotTrees(k.inputs)
     // Leaf / non-child-bearing kinds.
     case .heading, .markdown, .metric, .badge, .sparkline, .callout, .progress, .skeleton,
-      .fact, .labelValueRow, .link, .image, .list, .toast, .codeBlock, .math, .drawing,
+      .icon, .fact, .labelValueRow, .link, .image, .list, .toast, .codeBlock, .math, .drawing,
       .form, .filters, .button, .fileUpload, .select, .dataGrid, .chart, .map, .custom:
       return []
     }

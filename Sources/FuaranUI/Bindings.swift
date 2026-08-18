@@ -51,6 +51,9 @@ public indirect enum Binding: Equatable, Sendable {
   case selection(nodeId: String, defaultValue: StaticValue?, field: String?)
   case state(key: String, defaultValue: StaticValue)
   case computed
+  /// The host-furnished instant. Carries no payload: the value is supplied at resolve
+  /// time by the host clock, which is why it is a `Clock`-determinism source, not wire data.
+  case now
   case i18n(key: String, args: [NamedBinding]?)
   case local(flushOn: LocalFlushTrigger, initialFrom: Binding)
   case format(format: Format, locale: LocaleSource, source: Binding)
@@ -120,7 +123,10 @@ public indirect enum Action: Equatable, Sendable {
   case call(endpoint: String, into: CallResultTarget?, onResult: Closure?)
   case notify(channel: String, payload: JSON)
   case navigate(route: String)
-  case setState(key: String, value: JSON)
+  /// Exactly ONE of `value` (a literal payload) and `valueFrom` (a binding resolved at
+  /// dispatch time) is present - the schema states it as a `oneOf`, so both-present is a
+  /// reject rather than a precedence question.
+  case setState(key: String, value: JSON?, valueFrom: Binding?)
   case aiTool(toolName: String, args: JSON)
   case chain([Action])
   case commitLocal(nodeId: String)
@@ -156,6 +162,11 @@ public enum CellFormat: Equatable, Sendable {
   case percent(decimals: Int?)
   case significantDigits(digits: Int)
   case date(format: String)
+  case duration(unit: DurationUnit, style: DurationStyle)
+  /// A relative-time CELL format ("3 minutes ago"). Distinct from the `Format` DU's own
+  /// `relativeTime`: the wire carries two format DUs and a case in one is not a case in
+  /// the other.
+  case relativeTime(unit: RelativeTimeUnit)
   case custom
 }
 

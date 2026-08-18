@@ -42,7 +42,9 @@ import XCTest
         kind: .dataGrid(
           GridSpec(
             columns: columns, editable: false, source: .query(name: "rows", dependsOn: []),
-            onRowClick: nil, rowKey: nil, rowKeyField: "status", staticRows: nil)))
+            onRowClick: nil, rowKey: nil, rowKeyField: "status", staticRows: nil,
+            sortStateKey: nil, pageStateKey: nil, editStateKey: nil, pageSize: nil,
+            defaultSort: nil)))
     }
 
     private func rows(_ values: [String]) -> ResolvedRows {

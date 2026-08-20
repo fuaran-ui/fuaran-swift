@@ -47,14 +47,34 @@
     public var body: some View { fuaranNodeBody(node, ctx) }
   }
 
-  /// The dispatch: record coverage, then an **exhaustive `switch` with no
-  /// `default`** over the sealed `NodeKind`. Written as a plain function
-  /// (returning `AnyView`) rather than a `@ViewBuilder` so the coverage
-  /// side-effect statement is legal and so a coverage walk can invoke it
-  /// directly, node by node, without a live render pass.
+  /// The dispatch: record coverage, render the kind, then apply the node's
+  /// accessibility projection.
+  ///
+  /// **The projection's single emission site.** A SwiftUI surface has no wrapper
+  /// view, so `fuaranNodeKindBody` returns exactly the view the kind arm renders
+  /// — the node's semantic element — and the projection lands on it here. That
+  /// is the reference host's placement rule (`../fuaran-dotnet/docs/DECISIONS.md`
+  /// D4) in the only shape this platform offers, held at one site by
+  /// construction rather than by convention. See `Accessibility.swift`.
+  ///
+  /// A node with no projectable trait returns the arm's view untouched, so the
+  /// render path for the shared corpus (which carries no `accessibility` trait
+  /// on any fixture) is unchanged.
   @MainActor
   func fuaranNodeBody(_ node: Node, _ ctx: BindingContext) -> AnyView {
     ctx.coverage?.count(node.kind.typeName)
+    let body = fuaranNodeKindBody(node, ctx)
+    let projection = accessibilityProjection(node.accessibility, ctx)
+    return projection.isEmpty ? body : body.fuaranAccessibility(projection)
+  }
+
+  /// The kind dispatch: an **exhaustive `switch` with no `default`** over the
+  /// sealed `NodeKind`. Written as a plain function (returning `AnyView`) rather
+  /// than a `@ViewBuilder` so the coverage side-effect statement is legal and so
+  /// a coverage walk can invoke it directly, node by node, without a live render
+  /// pass.
+  @MainActor
+  func fuaranNodeKindBody(_ node: Node, _ ctx: BindingContext) -> AnyView {
     switch node.kind {
     // Layout
     case .box(let k): return AnyView(RenderBox(k: k, ctx: ctx))

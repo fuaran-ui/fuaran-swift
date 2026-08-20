@@ -170,6 +170,56 @@ are wired and the rest are inert by construction — which is a render floor, no
 a disabled control drops no input. The failure mode to avoid is a *live* control that quietly
 fails to commit; the sibling Kotlin host shipped exactly that in five arms (Phase 667).
 
+## Accessibility projection — the mapping, and what is dropped
+
+A node's `Accessibility` trait carries six slots. The HTML render tiers project them into `aria-*`
+attributes; a SwiftUI surface has no attribute bag, so the projection is a mapping onto
+accessibility **modifiers** — and the two vocabularies do not correspond one-for-one. The mapping
+lives in `Sources/FuaranUIRenderer/Accessibility.swift`; the decision is here.
+
+| slot | SwiftUI |
+|---|---|
+| `label` | `.accessibilityLabel(Text(…))`, resolved through the binding; an empty resolved label is dropped |
+| `labelledBy` | **no mapping** — dropped, reported |
+| `describedBy` | **no mapping** — dropped, reported |
+| `role` | `.accessibilityAddTraits` for `button` → `.isButton`, `link` → `.isLink`, `heading` → `.isHeader`; every other token **dropped, reported** |
+| `liveRegion` | `polite` / `assertive` → `.accessibilityAddTraits(.updatesFrequently)` (**partial**); `off` → nothing (an exact mapping — `off` is the platform default) |
+| `hidden` | `.accessibilityHidden(true)` when the binding resolves true |
+
+**An unmappable slot is DROPPED, never refused — and never silently.** Two halves, and both are
+load-bearing:
+
+*Never refused.* A render surface does not reject a tree the wire declares valid. Refusing would
+fork the vocabulary by platform — the same tree would render on one surface and fail on another —
+and it would make an author's `aria-describedby` a portability hazard rather than a hint. The
+model's own posture already says this ("carried best-effort for the render projection").
+
+*Never silently.* Silence is the defect this closed: the trait decoded into the model and was
+dropped on the floor, with nothing in the tree recording that a question had been asked. So the
+projection **returns its drop set** (`AccessibilityProjection.unmapped`, in wire-slot order), the
+tests assert it slot by slot, and this table enumerates it. A slot that becomes mappable moves from
+one list to the other and the assertion goes red until both are updated — which is what makes the
+drop set a decision rather than an omission.
+
+**Placement is by construction, not by convention.** The reference host decides which element
+carries the projection (`../fuaran-dotnet/docs/DECISIONS.md`, D4: the node's semantic element, not
+its wrapper `<div>`). A SwiftUI surface has no wrapper — `fuaranNodeKindBody` returns exactly the
+view the kind arm renders — so the node's own view IS the semantic element, and there is one
+emission site (`fuaranNodeBody`) with no second place to get it wrong.
+
+**Two approximations were declined**, and are worth stating so they are not re-proposed as
+improvements: `role: "tab"` as `.isButton` (VoiceOver would announce "button", which is a
+mis-statement, not a partial one) and `role: "dialog"` as `.isModal` (`.isModal` is `aria-modal` —
+"ignore my siblings" — a different assertion from `role="dialog"`). Compose maps `tab` genuinely
+(`Role.Tab`), so the two native surfaces have **different drop sets** by design; neither is the
+other's parity target, and the reference `aria-*` projection is what both answer to.
+
+**Forward-coupling.** A new slot on the wire trait, or a new `AriaRole` token, updates the mapping
+table above, `semanticTrait(forRole:)`, and the drop-set assertions in
+`Tests/FuaranUIRendererTests/AccessibilityProjectionTests.swift` in the same change. The mapping is
+deliberately **outside** `#if canImport(SwiftUI)` so those assertions run on every platform — a
+decision testable on only one platform is a decision nobody re-checks.
+
 ## Cross-repo dependencies
 
 The pure-Swift `FuaranUI` render projection has no upstream dependency on any other sibling. At test

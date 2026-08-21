@@ -50,12 +50,19 @@ public protocol FuaranTreeSession: Sendable {
   ///
   /// The out-of-band companion to `projectResolved`, and it exists because that
   /// projection cannot carry this. A row-context `Transform` resolves to a
-  /// *collection*, and the wire's `Static` slot erases a collection to
-  /// `"<opaque>"` (§2 rule 11) — so resolved rows cannot ride the tree at all. A
+  /// *collection*, and the wire's `Static` slot erases a COMPUTED collection to
+  /// `"<opaque>"` (§2 rule 11) — so such rows cannot ride the tree. A
   /// decode-only surface therefore cannot obtain them from `treeJSON` however
-  /// much of the tree it understands, and renders every data-bound grid empty.
+  /// much of the tree it understands, and renders that data-bound grid empty.
   /// This is the hand-off that fixes that, keeping the division the tiers rest
   /// on: the core evaluates, this surface renders.
+  ///
+  /// fuaran#665 narrowed *which* feeds that argument covers, and did not retire
+  /// it: an AUTHORED rows feed (`Static` / `State`) is now typed on the wire and
+  /// does ride the tree, while a `Transform`- or `Query`-sourced feed still
+  /// resolves only here. Both arrive through this one call, so a surface needs
+  /// no per-source knowledge — which is why it is addressed by node id rather
+  /// than by binding case.
   ///
   /// A hard requirement rather than an extension default, for the same reason
   /// `projectResolved` is one: an async default would out-resolve the live

@@ -24,11 +24,18 @@ public struct BindingContext: Sendable {
   /// Node id -> the resolved rows of that row-bearing node, seeded by the host
   /// from `FuaranTreeSession.resolvedRows(nodeId:)`.
   ///
-  /// Rows arrive through this channel rather than out of the tree because they
-  /// cannot ride the tree: a row-context `Transform` resolves to a collection,
-  /// which the wire's `Static` slot erases to `"<opaque>"` (§2 rule 11). The
-  /// core evaluates and the host seeds; this stays pure, exactly as `state`
-  /// does — no FFI crosses into the renderer.
+  /// Rows arrive through this channel rather than out of the tree because a
+  /// COMPUTED feed cannot ride the tree: a row-context `Transform` resolves to
+  /// a collection, which the wire's `Static` slot erases to `"<opaque>"`
+  /// (§2 rule 11). The core evaluates and the host seeds; this stays pure,
+  /// exactly as `state` does — no FFI crosses into the renderer.
+  ///
+  /// fuaran#665 narrowed *which* feeds that argument covers, and did not retire
+  /// it: an AUTHORED rows feed (`Static` / `State`) is now typed on the wire and
+  /// does ride the tree, while a `Transform`- or `Query`-sourced feed still
+  /// resolves only through the core. The seam is unchanged and still needed —
+  /// the host seeds both through this one channel, so the renderer needs no
+  /// per-source knowledge.
   ///
   /// An **absent** entry is not an empty grid. It means nothing has been seeded
   /// for that node, which reads as `.notResolved` at the render site: a loading

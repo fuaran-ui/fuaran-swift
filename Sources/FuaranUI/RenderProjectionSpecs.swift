@@ -759,9 +759,9 @@ extension Decode {
 
   // ── Layout specs ───────────────────────────────────────────────────────────
 
-  static func children(_ path: String, _ f: [String: JSON]) throws -> [Node] {
+  static func children(_ path: String, _ f: [String: JSON], _ walk: WireWalkState) throws -> [Node] {
     try array("\(path).children", try req(path, f, "children")).enumerated()
-      .map { try node("\(path).children[\($0.0)]", $0.1) }
+      .map { try node("\(path).children[\($0.0)]", $0.1, walk) }
   }
 
   static func boxLayout(_ path: String, _ j: JSON) throws -> BoxLayout {
@@ -787,55 +787,55 @@ extension Decode {
     }
   }
 
-  static func boxSpec(_ path: String, _ j: JSON) throws -> BoxSpec {
+  static func boxSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> BoxSpec {
     let f = try object(path, j)
     let roleStr = try string("\(path).role", try req(path, f, "role"))
     guard let role = BoxRole(rawValue: roleStr) else {
       throw unknownCase("\(path).role", roleStr, "Group | Card | Dashboard | Separator")
     }
     return BoxSpec(
-      children: try children(path, f),
+      children: try children(path, f, walk),
       // Field alias: title → heading (Box is in the scoped set).
       heading: try optTextSourceAliased(path, f, "heading", ["title"]),
       layout: try boxLayout("\(path).layout", try req(path, f, "layout")),
       role: role)
   }
 
-  static func legacyDashboard(_ path: String, _ j: JSON) throws -> BoxSpec {
+  static func legacyDashboard(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> BoxSpec {
     let f = try object(path, j)
-    return BoxSpec(children: try children(path, f), heading: nil, layout: .auto, role: .dashboard)
+    return BoxSpec(children: try children(path, f, walk), heading: nil, layout: .auto, role: .dashboard)
   }
 
-  static func legacyStack(_ path: String, _ j: JSON) throws -> BoxSpec {
+  static func legacyStack(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> BoxSpec {
     let f = try object(path, j)
     let direction: Orientation = try orientation(
       "\(path).orientation", try req(path, f, "orientation"))
     return BoxSpec(
-      children: try children(path, f), heading: nil,
+      children: try children(path, f, walk), heading: nil,
       layout: .flex(direction: direction, gap: nil, wrap: try reqBool(path, f, "wrap")),
       role: .group)
   }
 
-  static func legacyGridLayout(_ path: String, _ j: JSON) throws -> BoxSpec {
+  static func legacyGridLayout(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> BoxSpec {
     let f = try object(path, j)
     return BoxSpec(
-      children: try children(path, f), heading: nil,
+      children: try children(path, f, walk), heading: nil,
       layout: .grid(
         cols: try reqInt(path, f, "cols"), gap: nil,
         templateColumns: try optString(path, f, "templateColumns")),
       role: .group)
   }
 
-  static func legacyCard(_ path: String, _ j: JSON) throws -> BoxSpec {
+  static func legacyCard(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> BoxSpec {
     let f = try object(path, j)
     return BoxSpec(
-      children: try children(path, f), heading: try optTextSource(path, f, "heading"),
+      children: try children(path, f, walk), heading: try optTextSource(path, f, "heading"),
       layout: .flex(direction: .vertical, gap: nil, wrap: false), role: .card)
   }
 
-  static func splitPanelSpec(_ path: String, _ j: JSON) throws -> SplitPanelSpec {
+  static func splitPanelSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> SplitPanelSpec {
     let f = try object(path, j)
-    return SplitPanelSpec(children: try children(path, f), weight: try reqFloat(path, f, "weight"))
+    return SplitPanelSpec(children: try children(path, f, walk), weight: try reqFloat(path, f, "weight"))
   }
 
   static func tabHeader(_ path: String, _ j: JSON) throws -> TabHeader {
@@ -846,7 +846,7 @@ extension Decode {
       disabled: try optBinding(path, f, "disabled"))
   }
 
-  static func tabsSpec(_ path: String, _ j: JSON) throws -> TabsSpec {
+  static func tabsSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> TabsSpec {
     let f = try object(path, j)
     var tabHeaders: [TabHeader]? = nil
     if let v = f["tabHeaders"] {
@@ -872,7 +872,7 @@ extension Decode {
       orient = .horizontal
     }
     return TabsSpec(
-      children: try children(path, f),
+      children: try children(path, f, walk),
       orientation: orient,
       activeIndex: activeIndex,
       onSelect: optClosure(f, "onSelect"),
@@ -882,24 +882,24 @@ extension Decode {
       onSelectTag: optClosure(f, "onSelectTag"))
   }
 
-  static func stepperSpec(_ path: String, _ j: JSON) throws -> StepperSpec {
+  static func stepperSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> StepperSpec {
     let f = try object(path, j)
     return StepperSpec(
-      activeStep: try reqBinding(path, f, "activeStep"), children: try children(path, f))
+      activeStep: try reqBinding(path, f, "activeStep"), children: try children(path, f, walk))
   }
 
-  static func summaryListSpec(_ path: String, _ j: JSON) throws -> SummaryListSpec {
+  static func summaryListSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> SummaryListSpec {
     let f = try object(path, j)
     return SummaryListSpec(
-      children: try children(path, f),
+      children: try children(path, f, walk),
       // Field alias: title → heading.
       heading: try optTextSourceAliased(path, f, "heading", ["title"]))
   }
 
-  static func disclosureSpec(_ path: String, _ j: JSON) throws -> DisclosureSpec {
+  static func disclosureSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> DisclosureSpec {
     let f = try object(path, j)
     return DisclosureSpec(
-      children: try children(path, f),
+      children: try children(path, f, walk),
       defaultOpen: try reqBool(path, f, "defaultOpen"),
       // Field alias: title → heading.
       heading: try reqTextSourceAliased(path, f, "heading", ["title"]),
@@ -907,12 +907,12 @@ extension Decode {
       onToggle: optClosure(f, "onToggle"))
   }
 
-  static func modalSpec(_ path: String, _ j: JSON) throws -> ModalSpec {
+  static func modalSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> ModalSpec {
     let f = try object(path, j)
     var onDismiss: Action? = nil
     if let v = f["onDismiss"] { onDismiss = try action("\(path).onDismiss", v) }
     return ModalSpec(
-      children: try children(path, f),
+      children: try children(path, f, walk),
       dismissable: try reqBool(path, f, "dismissable"),
       open: try reqBinding(path, f, "open"),
       onDismiss: onDismiss,
@@ -920,10 +920,10 @@ extension Decode {
       heading: try optTextSourceAliased(path, f, "heading", ["title"]))
   }
 
-  static func scrollAreaSpec(_ path: String, _ j: JSON) throws -> ScrollAreaSpec {
+  static func scrollAreaSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> ScrollAreaSpec {
     let f = try object(path, j)
     return ScrollAreaSpec(
-      children: try children(path, f),
+      children: try children(path, f, walk),
       orientation: try bareEnum(
         "\(path).orientation", try req(path, f, "orientation"), "ScrollOrientation"),
       maxHeight: try optInt(path, f, "maxHeight"),
@@ -1011,39 +1011,39 @@ extension Decode {
     return EffectClass(hostEffect: host, determinism: det)
   }
 
-  static func fragmentArg(_ path: String, _ j: JSON) throws -> FragmentArg {
+  static func fragmentArg(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> FragmentArg {
     let f = try object(path, j)
     if try disc(path, f) == "SlotArg" {
-      return .slot(tree: try node("\(path).tree", try req(path, f, "tree")))
+      return .slot(tree: try node("\(path).tree", try req(path, f, "tree"), walk))
     }
     return .value(try fragmentScalar(path, j))
   }
 
-  static func fragmentArgs(_ path: String, _ j: JSON) throws -> [FragmentArgEntry] {
+  static func fragmentArgs(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> [FragmentArgEntry] {
     let f = try object(path, j)
     return try f.map {
-      FragmentArgEntry(name: $0.key, arg: try fragmentArg("\(path).\($0.key)", $0.value))
+      FragmentArgEntry(name: $0.key, arg: try fragmentArg("\(path).\($0.key)", $0.value, walk))
     }
   }
 
   // ── NodeKind dispatch ──────────────────────────────────────────────────────
 
-  static func nodeKind(_ path: String, _ j: JSON) throws -> NodeKind {
+  static func nodeKind(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> NodeKind {
     let f = try object(path, j)
     switch try disc(path, f) {
     // Layout (+ the four legacy decode-upgrade tags).
-    case "Box": return .box(try boxSpec(path, j))
-    case "Dashboard": return .box(try legacyDashboard(path, j))
-    case "Stack": return .box(try legacyStack(path, j))
-    case "GridLayout": return .box(try legacyGridLayout(path, j))
-    case "Card": return .box(try legacyCard(path, j))
-    case "SplitPanel": return .splitPanel(try splitPanelSpec(path, j))
-    case "Tabs": return .tabs(try tabsSpec(path, j))
-    case "Stepper": return .stepper(try stepperSpec(path, j))
-    case "SummaryList": return .summaryList(try summaryListSpec(path, j))
-    case "Disclosure": return .disclosure(try disclosureSpec(path, j))
-    case "Modal": return .modal(try modalSpec(path, j))
-    case "ScrollArea": return .scrollArea(try scrollAreaSpec(path, j))
+    case "Box": return .box(try boxSpec(path, j, walk))
+    case "Dashboard": return .box(try legacyDashboard(path, j, walk))
+    case "Stack": return .box(try legacyStack(path, j, walk))
+    case "GridLayout": return .box(try legacyGridLayout(path, j, walk))
+    case "Card": return .box(try legacyCard(path, j, walk))
+    case "SplitPanel": return .splitPanel(try splitPanelSpec(path, j, walk))
+    case "Tabs": return .tabs(try tabsSpec(path, j, walk))
+    case "Stepper": return .stepper(try stepperSpec(path, j, walk))
+    case "SummaryList": return .summaryList(try summaryListSpec(path, j, walk))
+    case "Disclosure": return .disclosure(try disclosureSpec(path, j, walk))
+    case "Modal": return .modal(try modalSpec(path, j, walk))
+    case "ScrollArea": return .scrollArea(try scrollAreaSpec(path, j, walk))
     // Display.
     case "Heading": return .heading(try headingSpec(path, j))
     case "Markdown": return .markdown(try markdownSpec(path, j))
@@ -1104,8 +1104,8 @@ extension Decode {
     case "ErrorBoundary":
       return .errorBoundary(
         ErrorBoundarySpec(
-          child: try node("\(path).child", try req(path, f, "child")),
-          fallback: try node("\(path).fallback", try req(path, f, "fallback"))))
+          child: try node("\(path).child", try req(path, f, "child"), walk),
+          fallback: try node("\(path).fallback", try req(path, f, "fallback"), walk)))
     case "Switch":
       let cases = try array("\(path).cases", try req(path, f, "cases")).enumerated()
         .map { (i, item) -> SwitchCase in
@@ -1113,7 +1113,7 @@ extension Decode {
           return SwitchCase(
             matchValue: try reqString("\(path).cases[\(i)]", cf, "match"),
             child: try node(
-              "\(path).cases[\(i)].child", try req("\(path).cases[\(i)]", cf, "child")))
+              "\(path).cases[\(i)].child", try req("\(path).cases[\(i)]", cf, "child"), walk))
         }
       // The selector widened: `on` takes any Binding (a `Selection` makes the branch
       // follow the clicked row), so `stateKey` is no longer required on its own. The
@@ -1128,7 +1128,7 @@ extension Decode {
         SwitchSpec(
           stateKey: switchKey,
           cases: cases,
-          defaultChild: try node("\(path).default", try req(path, f, "default")),
+          defaultChild: try node("\(path).default", try req(path, f, "default"), walk),
           on: switchOn))
     case "FragmentDecl":
       var holes: [HoleDecl] = []
@@ -1141,11 +1141,11 @@ extension Decode {
       return .fragmentDecl(
         FragmentDeclSpec(
           name: try reqString(path, f, "name"),
-          body: try node("\(path).body", try req(path, f, "body")),
+          body: try node("\(path).body", try req(path, f, "body"), walk),
           holes: holes, effect: effect))
     case "FragmentRef":
       let args: [FragmentArgEntry] =
-        try f["args"].map { try fragmentArgs("\(path).args", $0) } ?? []
+        try f["args"].map { try fragmentArgs("\(path).args", $0, walk) } ?? []
       return .fragmentRef(FragmentRefSpec(name: try reqString(path, f, "name"), args: args))
     case "Mount":
       let channelObj = try object("\(path).channel", try req(path, f, "channel"))
@@ -1156,7 +1156,7 @@ extension Decode {
       let caps = try array("\(path).capabilities", try req(path, f, "capabilities")).enumerated()
         .map { try string("\(path).capabilities[\($0.0)]", $0.1) }
       let inputs: [FragmentArgEntry] =
-        try f["inputs"].map { try fragmentArgs("\(path).inputs", $0) } ?? []
+        try f["inputs"].map { try fragmentArgs("\(path).inputs", $0, walk) } ?? []
       return .mount(
         MountSpec(
           scopeId: try reqString(path, f, "scopeId"),
@@ -1172,12 +1172,12 @@ extension Decode {
 
   // ── Node envelope ──────────────────────────────────────────────────────────
 
-  static func stateBehaviour(_ path: String, _ j: JSON) throws -> StateBehaviour {
+  static func stateBehaviour(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> StateBehaviour {
     let f = try object(path, j)
     var onLoading: NodeRef? = nil
-    if let v = f["onLoading"] { onLoading = NodeRef(try node("\(path).onLoading", v)) }
+    if let v = f["onLoading"] { onLoading = NodeRef(try node("\(path).onLoading", v, walk)) }
     var onEmpty: NodeRef? = nil
-    if let v = f["onEmpty"] { onEmpty = NodeRef(try node("\(path).onEmpty", v)) }
+    if let v = f["onEmpty"] { onEmpty = NodeRef(try node("\(path).onEmpty", v, walk)) }
     return StateBehaviour(onLoading: onLoading, onEmpty: onEmpty, onError: optClosure(f, "onError"))
   }
 
@@ -1208,15 +1208,22 @@ extension Decode {
       hidden: try optBinding(path, f, "hidden"))
   }
 
-  static func node(_ path: String, _ j: JSON) throws -> Node {
+  /// The single funnel for NODE recursion — every child, every nested slot and the root
+  /// all arrive here, which is what makes one `enterNode` call bound the whole node axis.
+  /// The counter is entered BEFORE the shape check below, so a document past the limit is
+  /// refused for being too deep rather than for whatever the over-deep value happens to
+  /// look like.
+  static func node(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> Node {
+    try walk.enterNode(path)
+    defer { walk.exitNode() }
     let f = try object(path, j)
     let id = try string("\(path).id", try req(path, f, "id"))
     if id.isEmpty {
       throw err(.emptyNodeId, "\(path).id", "Node id is empty")
     }
-    let kind = try nodeKind("\(path).kind", try req(path, f, "kind"))
+    let kind = try nodeKind("\(path).kind", try req(path, f, "kind"), walk)
     let state: StateBehaviour =
-      try f["state"].map { try stateBehaviour("\(path).state", $0) } ?? .empty
+      try f["state"].map { try stateBehaviour("\(path).state", $0, walk) } ?? .empty
     let style: SemanticStyle =
       try f["style"].map { try semanticStyle("\(path).style", $0) } ?? .default
     let accessibilityV: Accessibility? =

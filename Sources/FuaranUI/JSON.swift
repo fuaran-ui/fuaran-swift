@@ -37,12 +37,36 @@ private struct JSONParser {
   private let scalars: [Unicode.Scalar]
   private var i = 0
 
+  /// Current SYNTACTIC nesting depth (``WireLimits/maxJSONDepth``). Incremented on the
+  /// way DOWN — before the recursion that would breach the bound — so nothing has been
+  /// allocated when it fires, and never by measuring the value that was built. A field on
+  /// the parser rather than shared state precisely because a parser is per-parse: two
+  /// concurrent parses cannot see each other's count, with no locking and no thread-local.
+  private var depth = 0
+
   init(_ scalars: [Unicode.Scalar]) { self.scalars = scalars }
 
   var atEnd: Bool { i >= scalars.count }
 
   private func err(_ message: String) -> FuaranDecodeError {
     FuaranDecodeError(code: .invalidJson, path: "$", message: message)
+  }
+
+  /// A limit breach is NOT a syntax error, and the two must not collapse: the input is
+  /// well-formed and merely too large to walk. Only the parser can tell them apart, which
+  /// is why it raises the distinction rather than leaving the decoder to infer it.
+  private func limit(_ message: String) -> FuaranDecodeError {
+    FuaranDecodeError(code: .limitExceeded, path: "$", message: message)
+  }
+
+  /// Enters one composite level, refusing the level that would breach the bound.
+  private mutating func enterComposite() throws {
+    depth += 1
+    if depth > WireLimits.maxJSONDepth {
+      throw limit(
+        "JSON nesting deeper than the wire limit maxJSONDepth = \(WireLimits.maxJSONDepth); "
+          + "expected a document nesting no more than \(WireLimits.maxJSONDepth) levels deep")
+    }
   }
 
   mutating func skipWhitespace() {
@@ -97,6 +121,11 @@ private struct JSONParser {
 
   private mutating func parseObject() throws -> JSON {
     try expect("{")
+    // BEFORE the empty-composite arm below, deliberately: every `{` counts, empty or not.
+    // Testing after it leaves the innermost level of a `{{{…}}}` payload unmeasured —
+    // the exact off-by-one that made the host family disagree by one level here.
+    try enterComposite()
+    defer { depth -= 1 }
     var out: [String: JSON] = [:]
     skipWhitespace()
     if peek() == "}" {
@@ -110,6 +139,12 @@ private struct JSONParser {
       skipWhitespace()
       try expect(":")
       out[key] = try parseValue()
+      if out.count > WireLimits.maxArrayLength {
+        throw limit(
+          "an object has more members than the wire limit maxArrayLength = "
+            + "\(WireLimits.maxArrayLength); expected objects of no more than "
+            + "\(WireLimits.maxArrayLength) members")
+      }
       skipWhitespace()
       switch peek() {
       case ",": i += 1
@@ -123,6 +158,9 @@ private struct JSONParser {
 
   private mutating func parseArray() throws -> JSON {
     try expect("[")
+    // See the note in parseObject: before the empty arm, every `[` counts.
+    try enterComposite()
+    defer { depth -= 1 }
     var out: [JSON] = []
     skipWhitespace()
     if peek() == "]" {
@@ -131,6 +169,12 @@ private struct JSONParser {
     }
     while true {
       out.append(try parseValue())
+      if out.count > WireLimits.maxArrayLength {
+        throw limit(
+          "an array is longer than the wire limit maxArrayLength = "
+            + "\(WireLimits.maxArrayLength); expected arrays of no more than "
+            + "\(WireLimits.maxArrayLength) elements")
+      }
       skipWhitespace()
       switch peek() {
       case ",": i += 1
@@ -145,7 +189,21 @@ private struct JSONParser {
   private mutating func parseString() throws -> String {
     try expect("\"")
     var out = String.UnicodeScalarView()
+    // Counted rather than measured: `out.count` is O(n) on a scalar view, so checking it
+    // per iteration would make the loop quadratic — on exactly the hostile input the
+    // bound exists to refuse.
+    var appended = 0
     while i < scalars.count {
+      // Inside the accumulation loop rather than after it, so a hostile 100 MB literal is
+      // refused partway through rather than built in full and measured afterwards.
+      // `>` and not `>=`: a string of exactly maxStringLength scalars is admissible, and a
+      // bound one character too tight would refuse a document every host must accept.
+      if appended > WireLimits.maxStringLength {
+        throw limit(
+          "a string is longer than the wire limit maxStringLength = "
+            + "\(WireLimits.maxStringLength); expected strings of no more than "
+            + "\(WireLimits.maxStringLength) characters")
+      }
       let c = scalars[i]
       i += 1
       switch c {
@@ -170,6 +228,7 @@ private struct JSONParser {
       default:
         out.append(c)
       }
+      appended += 1
     }
     throw err("unterminated string")
   }
@@ -246,6 +305,14 @@ public struct FuaranDecodeError: Error, Equatable {
     case unknownDuCase = "UNKNOWN_DU_CASE"
     case emptyNodeId = "EMPTY_NODE_ID"
     case wrongNodeKind = "WRONG_NODE_KIND"
+
+    /// A ``WireLimits`` resource bound is breached — node depth, JSON depth, string
+    /// length, array length, or total node count. The input is well-formed JSON; it is
+    /// refused for being structurally unbounded, which is exactly why this is not
+    /// ``invalidJson``: calling a well-formed-but-too-deep document malformed is an
+    /// actively wrong diagnosis. `message` names the limit and the observed shape, so an
+    /// author repairing the document knows which bound to come back under.
+    case limitExceeded = "LIMIT_EXCEEDED"
   }
 
   public let code: Code

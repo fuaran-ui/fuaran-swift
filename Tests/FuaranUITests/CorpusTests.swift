@@ -12,21 +12,78 @@ import XCTest
 
 @testable import FuaranUI
 
+/// Raised when the corpus is absent from a checkout that plainly has one. Distinct from
+/// `XCTSkip`, which is what a genuinely standalone clone gets.
+struct CorpusMissingOnCrossHostCheckout: Error {}
+
 final class CorpusTests: XCTestCase {
   /// Locate the shared corpus relative to this source file:
   /// `<repo>/Tests/FuaranUITests/CorpusTests.swift` → `<repo>/../wire-format-fixtures`.
   static func corpusDir() -> URL? {
-    let here = URL(fileURLWithPath: #filePath)
-    let repoRoot =
-      here
+    var isDir: ObjCBool = false
+    let exists = FileManager.default.fileExists(
+      atPath: expectedCorpusPath.path, isDirectory: &isDir)
+    return exists && isDir.boolValue ? expectedCorpusPath : nil
+  }
+
+  static var repoRoot: URL {
+    URL(fileURLWithPath: #filePath)
       .deletingLastPathComponent()  // FuaranUITests
       .deletingLastPathComponent()  // Tests
       .deletingLastPathComponent()  // fuaran-swift
-    let corpus = repoRoot.deletingLastPathComponent().appendingPathComponent(
-      "wire-format-fixtures")
-    var isDir: ObjCBool = false
-    let exists = FileManager.default.fileExists(atPath: corpus.path, isDirectory: &isDir)
-    return exists && isDir.boolValue ? corpus : nil
+  }
+
+  static var expectedCorpusPath: URL {
+    repoRoot.deletingLastPathComponent().appendingPathComponent("wire-format-fixtures")
+  }
+
+  /// Sibling hosts whose presence proves this is a CROSS-HOST checkout — the shape the
+  /// conformance gate is built from — rather than a standalone clone of this repo alone.
+  /// Excludes this host.
+  static let siblingHostNames = [
+    "fuaran-dotnet", "fuaran", "fuaran-ts", "fuaran-py", "fuaran-go", "fuaran-rs", "fuaran-kt",
+  ]
+
+  /// Walks up from the repo looking for a sibling host. A hit means the corpus is absent
+  /// from a checkout that plainly HAS one — it moved, was renamed, or this locator went
+  /// stale — and the right answer is to fail, not to skip.
+  static func crossHostSibling() -> (name: String, under: URL)? {
+    var dir = repoRoot
+    while true {
+      for name in siblingHostNames {
+        var isDir: ObjCBool = false
+        let candidate = dir.appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDir),
+          isDir.boolValue
+        {
+          return (name, dir)
+        }
+      }
+      let parent = dir.deletingLastPathComponent()
+      if parent.path == dir.path { return nil }
+      dir = parent
+    }
+  }
+
+  /// The corpus, or the right kind of stop.
+  ///
+  /// A missing corpus has two very different meanings, and collapsing them into one clean
+  /// `XCTSkip` is a vacuous green: on a standalone clone the skip is honest, but on a
+  /// cross-host checkout it means the conformance gate silently certified NOTHING while
+  /// reporting success. Discriminate, and FAIL in the second case — naming the path that
+  /// was tried, so the fix is to correct the locator rather than to let the harness keep
+  /// skipping.
+  static func requireCorpus() throws -> URL {
+    if let corpus = corpusDir() { return corpus }
+    if let sibling = crossHostSibling() {
+      XCTFail(
+        "cross-host checkout detected (\(sibling.name)/ is present under \(sibling.under.path)) "
+          + "but the wire-format-fixtures corpus is not at \(expectedCorpusPath.path) — this gate "
+          + "certified NOTHING. If the corpus moved or was renamed, correct `expectedCorpusPath` "
+          + "rather than letting the harness skip.")
+      throw CorpusMissingOnCrossHostCheckout()
+    }
+    throw XCTSkip("wire-format-fixtures corpus not found — standalone checkout; skipping.")
   }
 
   struct Fixture {
@@ -68,9 +125,7 @@ final class CorpusTests: XCTestCase {
   /// decodes into the sealed model. A throw is a hard failure — that is the
   /// "zero fallback-arm hits" bar.
   func testEveryNodeFixtureDecodes() throws {
-    guard let corpus = Self.corpusDir() else {
-      throw XCTSkip("wire-format-fixtures corpus not found — standalone checkout; skipping.")
-    }
+    let corpus = try Self.requireCorpus()
     let fixtures = try Self.loadFixtures(corpus)
     let nodeFixtures = fixtures.filter {
       $0.decoder == "node" && ($0.kind == "node-round-trip" || $0.kind == "lenient-accept")
@@ -111,9 +166,7 @@ final class CorpusTests: XCTestCase {
   /// The node-round-trip family alone must exercise a broad slice of the flat
   /// vocabulary — a guard that the harness is really walking the corpus.
   func testNodeRoundTripFamilyCoversManyKinds() throws {
-    guard let corpus = Self.corpusDir() else {
-      throw XCTSkip("wire-format-fixtures corpus not found — skipping.")
-    }
+    let corpus = try Self.requireCorpus()
     let fixtures = try Self.loadFixtures(corpus).filter {
       $0.decoder == "node" && $0.kind == "node-round-trip"
     }
@@ -155,9 +208,7 @@ final class CorpusTests: XCTestCase {
   ///    belongs to versioning-envelope negotiation — a codec-host obligation
   ///    this decode-only surface does not carry and does not model.
   func testEveryRejectFixtureIsRefused() throws {
-    guard let corpus = Self.corpusDir() else {
-      throw XCTSkip("wire-format-fixtures corpus not found — standalone checkout; skipping.")
-    }
+    let corpus = try Self.requireCorpus()
     let rejects = try Self.loadFixtures(corpus).filter {
       $0.kind == "reject" && $0.decoder == "node"
     }
@@ -225,9 +276,7 @@ final class CorpusTests: XCTestCase {
   /// shape §22.2 refuses — so a group this leg neither runs nor names as
   /// not-applicable FAILS.
   func testSanitizationFamilyInvariants() throws {
-    guard let corpus = Self.corpusDir() else {
-      throw XCTSkip("wire-format-fixtures corpus not found — standalone checkout; skipping.")
-    }
+    let corpus = try Self.requireCorpus()
     let notApplicable = [
       "markdown-body":
         "no markup emission and no HTML-parsing text path — text renders as content",

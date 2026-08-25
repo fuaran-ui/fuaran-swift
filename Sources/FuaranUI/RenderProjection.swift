@@ -14,7 +14,9 @@ public enum RenderProjection {
   /// Decode a canonical wire `Node` document into the sealed tree model.
   public static func decodeNode(_ json: String) throws -> Node {
     let root = try JSON.parse(json)
-    return try Decode.node("$", root)
+    // The §21 walk state is created HERE, per call, and threaded down — see the note on
+    // `WireWalkState`. One document, one budget; nothing survives between decodes.
+    return try Decode.node("$", root, WireWalkState())
   }
 }
 

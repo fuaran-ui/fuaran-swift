@@ -85,11 +85,13 @@ if (-not $env:FUARAN_RS_STATICLIB_DIR) {
 if (-not $SkipBuild) {
     Write-Step "swift build"
     & swift build
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
 if (-not $SkipTests) {
     Write-Step "swift test"
     & swift test
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
 # ── XCFramework packaging (opt-in; macOS + xcodebuild only) ────────────────────

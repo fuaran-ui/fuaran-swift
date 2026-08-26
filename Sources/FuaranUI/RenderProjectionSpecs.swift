@@ -93,7 +93,7 @@ extension Decode {
     let protection: LinkProtection? =
       try f["protection"].map { try bareEnum("\(path).protection", $0, "LinkProtection") }
     return LinkSpec(
-      href: try reqBinding(path, f, "href"),
+      href: try reqBindingSlot(path, f, "href", .str),
       label: try reqTextSource(path, f, "label"),
       download: try reqBool(path, f, "download"),
       rel: try optString(path, f, "rel"),
@@ -105,7 +105,7 @@ extension Decode {
     let f = try object(path, j)
     return ImageSpec(
       alt: try reqTextSource(path, f, "alt"),
-      src: try reqBinding(path, f, "src"),
+      src: try reqBindingSlot(path, f, "src", .str),
       variant: try bareEnum("\(path).variant", try req(path, f, "variant"), "ImageVariant"))
   }
 
@@ -121,7 +121,7 @@ extension Decode {
     return ToastSpec(
       message: try reqTextSource(path, f, "message"),
       tone: try optToneDefault(path, f, "tone"),
-      open: try reqBinding(path, f, "open"),
+      open: try reqBindingSlot(path, f, "open", .bool),
       // 0.2.0 — omitted-when-TRUE (a toast is dismissable unless said
       // otherwise; the one inverted default in §3.6's table).
       dismissable: try optBool(path, f, "dismissable") ?? true)
@@ -210,8 +210,8 @@ extension Decode {
     var emphasis: Emphasis? = nil
     if let v = f["emphasis"] { emphasis = try emphasisEnum("\(path).emphasis", v) }
     return DrawStyle(
-      fill: try optBinding(path, f, "fill"),
-      stroke: try optBinding(path, f, "stroke"),
+      fill: try optBindingSlot(path, f, "fill", .str),
+      stroke: try optBindingSlot(path, f, "stroke", .str),
       strokeWidth: try optBinding(path, f, "strokeWidth"),
       opacity: try optBinding(path, f, "opacity"),
       textAnchor: textAnchor,
@@ -351,16 +351,16 @@ extension Decode {
     }
     switch try disc(path, f) {
     case "Text":
-      return .text(value: try valueOr(.untyped, ControlValueDefaults.text), onChange: onChange)
+      return .text(value: try valueOr(.str, ControlValueDefaults.text), onChange: onChange)
     case "Number":
       return .number(value: try valueOr(.untyped, ControlValueDefaults.number), onChange: onChange)
     case "Checkbox":
       return .checkbox(
-        value: try valueOr(.untyped, ControlValueDefaults.checkbox), onToggle: onToggle)
+        value: try valueOr(.bool, ControlValueDefaults.checkbox), onToggle: onToggle)
     // The switch affordance beside a Checkbox: the same boolean slot, a different control.
     case "Toggle":
       return .toggle(
-        value: try valueOr(.untyped, ControlValueDefaults.checkbox), onToggle: onToggle)
+        value: try valueOr(.bool, ControlValueDefaults.checkbox), onToggle: onToggle)
     case "Choice":
       return .choice(
         options: try reqBindingSlot(path, f, "options", .options),
@@ -402,11 +402,11 @@ extension Decode {
     case "TextArea":
       return .textArea(
         rows: try reqInt(path, f, "rows"),
-        value: try valueOr(.untyped, ControlValueDefaults.text),
+        value: try valueOr(.str, ControlValueDefaults.text),
         onChange: onChange)
     case "Date":
       return .date(
-        value: try valueOr(.untyped, ControlValueDefaults.date),
+        value: try valueOr(.str, ControlValueDefaults.date),
         variant: try bareEnum("\(path).variant", try req(path, f, "variant"), "DateVariant"),
         min: try optString(path, f, "min"), max: try optString(path, f, "max"),
         step: try optFloat(path, f, "step"), onChange: onChange)
@@ -458,7 +458,7 @@ extension Decode {
       fields: fields,
       onSubmit: try reqAction(path, f, "onSubmit"),
       submitLabel: try reqTextSource(path, f, "submitLabel"),
-      disabled: try optBinding(path, f, "disabled"))
+      disabled: try optBindingSlot(path, f, "disabled", .bool))
   }
 
   static func filterSpec(_ path: String, _ j: JSON) throws -> FilterSpec {
@@ -480,7 +480,7 @@ extension Decode {
       onClick: try reqAction(path, f, "onClick"),
       variant: try buttonVariant("\(path).variant", try req(path, f, "variant")),
       icon: try optString(path, f, "icon"),
-      disabled: try optBinding(path, f, "disabled"))
+      disabled: try optBindingSlot(path, f, "disabled", .bool))
   }
 
   static func selectSpec(_ path: String, _ j: JSON) throws -> SelectSpec {
@@ -494,7 +494,7 @@ extension Decode {
       value: try reqBindingSlot(path, f, "value", .stringOpt),
       onChange: optClosure(f, "onChange"),
       placeholder: try optTextSource(path, f, "placeholder"),
-      disabled: try optBinding(path, f, "disabled"),
+      disabled: try optBindingSlot(path, f, "disabled", .bool),
       multiple: (try optBool(path, f, "multiple")) == true,
       values: values,
       onChangeMulti: optClosure(f, "onChangeMulti"))
@@ -508,7 +508,7 @@ extension Decode {
       accept: accept,
       label: try reqTextSource(path, f, "label"),
       multiple: try reqBool(path, f, "multiple"),
-      disabled: try optBinding(path, f, "disabled"))
+      disabled: try optBindingSlot(path, f, "disabled", .bool))
   }
 
   // ── Visualisation specs ────────────────────────────────────────────────────
@@ -843,7 +843,7 @@ extension Decode {
     return TabHeader(
       label: try reqTextSource(path, f, "label"),
       icon: try optString(path, f, "icon"),
-      disabled: try optBinding(path, f, "disabled"))
+      disabled: try optBindingSlot(path, f, "disabled", .bool))
   }
 
   static func tabsSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> TabsSpec {
@@ -878,7 +878,7 @@ extension Decode {
       onSelect: optClosure(f, "onSelect"),
       tabHeaders: tabHeaders,
       tabTags: tabTags,
-      activeTag: try optBinding(path, f, "activeTag"),
+      activeTag: try optBindingSlot(path, f, "activeTag", .str),
       onSelectTag: optClosure(f, "onSelectTag"))
   }
 
@@ -903,7 +903,7 @@ extension Decode {
       defaultOpen: try reqBool(path, f, "defaultOpen"),
       // Field alias: title → heading.
       heading: try reqTextSourceAliased(path, f, "heading", ["title"]),
-      open: try reqBinding(path, f, "open"),
+      open: try reqBindingSlot(path, f, "open", .bool),
       onToggle: optClosure(f, "onToggle"))
   }
 
@@ -914,7 +914,7 @@ extension Decode {
     return ModalSpec(
       children: try children(path, f, walk),
       dismissable: try reqBool(path, f, "dismissable"),
-      open: try reqBinding(path, f, "open"),
+      open: try reqBindingSlot(path, f, "open", .bool),
       onDismiss: onDismiss,
       // Field alias: title → heading.
       heading: try optTextSourceAliased(path, f, "heading", ["title"]))
@@ -1200,12 +1200,12 @@ extension Decode {
     let liveRegion: LiveRegionKind? =
       try f["liveRegion"].map { try bareEnum("\(path).liveRegion", $0, "LiveRegionKind") }
     return Accessibility(
-      label: try optBinding(path, f, "label"),
+      label: try optBindingSlot(path, f, "label", .str),
       labelledBy: try optString(path, f, "labelledBy"),
       describedBy: try optString(path, f, "describedBy"),
       role: try optString(path, f, "role"),
       liveRegion: liveRegion,
-      hidden: try optBinding(path, f, "hidden"))
+      hidden: try optBindingSlot(path, f, "hidden", .bool))
   }
 
   /// The single funnel for NODE recursion — every child, every nested slot and the root

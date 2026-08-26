@@ -343,6 +343,15 @@ enum Decode {
 
 enum StaticSlot {
   case untyped, options, stringOpt, stringList, floatSeq, markers
+  /// A `Binding<string>` slot. The parsed payload still rides as `.ast`, so no
+  /// projected value and no decoded shape changes — what the slot adds is the
+  /// TYPE CHECK the reference host has always applied. §3.6's bare-scalar
+  /// coercion is about SHAPE; the slot's own `'T` still governs the value,
+  /// which is why `"hidden": "yes"` must be refused even though
+  /// `"label": "Home"` is sanctioned shorthand.
+  case str
+  /// A `Binding<bool>` slot — the `.str` reasoning at the other scalar type.
+  case bool
   /// The 0.2.0 `FormFieldKind.Range` dual-thumb `(min, max)` pair.
   case floatPair
   /// The 0.7.0 `FormFieldKind.DateRange` ordered `(from, to)` ISO-8601 pair.
@@ -351,6 +360,10 @@ enum StaticSlot {
   func placeholder() -> StaticValue {
     switch self {
     case .untyped: return .ast(.string(OPAQUE))
+    // The reference host's typed fallbacks (`""` / `false`), so an absent
+    // `State.defaultValue` at a scalar slot agrees with it.
+    case .str: return .ast(.string(""))
+    case .bool: return .ast(.bool(false))
     case .options:
       return .options([SelectOption(value: OPAQUE, label: .literal(OPAQUE))])
     case .stringOpt: return .stringOpt(OPAQUE)
@@ -366,6 +379,10 @@ enum StaticSlot {
     switch self {
     case .untyped:
       return .ast(v)
+    case .str:
+      return .ast(.string(try Decode.string(path, v)))
+    case .bool:
+      return .ast(.bool(try Decode.bool(path, v)))
     case .options:
       switch v {
       case .null: return .options([])
@@ -567,6 +584,13 @@ extension Decode {
   static func optBinding(_ path: String, _ f: [String: JSON], _ key: String) throws -> Binding? {
     guard let v = f[key] else { return nil }
     return try binding("\(path).\(key)", v)
+  }
+
+  static func optBindingSlot(
+    _ path: String, _ f: [String: JSON], _ key: String, _ slot: StaticSlot
+  ) throws -> Binding? {
+    guard let v = f[key] else { return nil }
+    return try bindingSlot("\(path).\(key)", v, slot)
   }
 
   static func bindingSlot(_ path: String, _ j: JSON, _ slot: StaticSlot) throws -> Binding {

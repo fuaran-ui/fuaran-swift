@@ -352,6 +352,21 @@ enum StaticSlot {
   case str
   /// A `Binding<bool>` slot — the `.str` reasoning at the other scalar type.
   case bool
+  /// A `Binding<float>` slot. §7's float admits `{ JSON number }` ∪ the three
+  /// sentinel spellings `"NaN"` / `"Infinity"` / `"-Infinity"` — those tokens
+  /// EXACTLY, case-sensitive — and nothing else. The exactness is the whole
+  /// content of the rule: `"nan"` is a WRONG_TYPE, not a lenient spelling, and
+  /// a boolean is one too. (This surface parses JSON with its own hand parser,
+  /// so a `true` arrives as `.bool` and can never answer a numeric test — the
+  /// `NSNumber` trap a `JSONSerialization` decoder would carry does not exist
+  /// here.)
+  case float
+  /// A `Binding<int>` slot. §7's integer admits `{ JSON number }` ONLY,
+  /// truncating via an integer cast. It has **no** non-finite form, so `"NaN"`
+  /// at an int slot is a WRONG_TYPE even though the identical token is
+  /// admissible one slot type over — which is exactly why `.int` cannot be
+  /// `.float`'s alias.
+  case int
   /// The 0.2.0 `FormFieldKind.Range` dual-thumb `(min, max)` pair.
   case floatPair
   /// The 0.7.0 `FormFieldKind.DateRange` ordered `(from, to)` ISO-8601 pair.
@@ -364,6 +379,8 @@ enum StaticSlot {
     // `State.defaultValue` at a scalar slot agrees with it.
     case .str: return .ast(.string(""))
     case .bool: return .ast(.bool(false))
+    // The reference host's typed numeric fallbacks (`0.0` / `0`).
+    case .float, .int: return .ast(.number(0))
     case .options:
       return .options([SelectOption(value: OPAQUE, label: .literal(OPAQUE))])
     case .stringOpt: return .stringOpt(OPAQUE)
@@ -383,6 +400,20 @@ enum StaticSlot {
       return .ast(.string(try Decode.string(path, v)))
     case .bool:
       return .ast(.bool(try Decode.bool(path, v)))
+    // `.float` / `.int` validate through the reference host's `requireFloat` /
+    // `requireInt`, then ride the AUTHORED payload unchanged — the slot adds a
+    // type check, not a normalisation, exactly as `.str` / `.bool` do. Riding
+    // it raw is what keeps a sentinel a sentinel: `"NaN"` stays
+    // `.string("NaN")` in the projection rather than collapsing to a
+    // `.number(nan)` the renderer's number paths would then have to
+    // special-case. Truncation of an int slot likewise stays where it already
+    // happens — at the point of consumption.
+    case .float:
+      _ = try Decode.float(path, v)
+      return .ast(v)
+    case .int:
+      _ = try Decode.int(path, v)
+      return .ast(v)
     case .options:
       switch v {
       case .null: return .options([])

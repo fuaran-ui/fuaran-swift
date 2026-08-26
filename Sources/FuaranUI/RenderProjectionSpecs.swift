@@ -18,13 +18,13 @@ extension Decode {
       label: try reqTextSource(path, f, "label"),
       // 0.2.0 rename law — scalar displayed value ⇒ `value`; the retired
       // `source` spelling is a hard error, the web-prior `data` alias remains.
-      value: try reqBindingAliased(path, f, "value", ["data"]),
+      value: try reqBindingSlotAliased(path, f, "value", ["data"], .float),
       // Phase 460 — the stylistic fields are omitted-when-default on the wire.
       format: try optCellFormatDefault(path, f, "format"),
       tone: try optToneDefault(path, f, "tone"),
       weight: try optWeightDefault(path, f, "weight"),
       emphasis: try optEmphasisDefault(path, f, "emphasis"),
-      trend: try optBinding(path, f, "trend"),
+      trend: try optBindingSlot(path, f, "trend", .float),
       trendFormat: trendFormat,
       icon: try optString(path, f, "icon"),
       subtext: try optTextSource(path, f, "subtext"))
@@ -51,7 +51,7 @@ extension Decode {
     return LabelValueRowSpec(
       label: try reqTextSource(path, f, "label"),
       // 0.2.0 rename law — scalar displayed value ⇒ `value` (`data` alias kept).
-      value: try reqBindingAliased(path, f, "value", ["data"]),
+      value: try reqBindingSlotAliased(path, f, "value", ["data"], .float),
       format: try optCellFormatDefault(path, f, "format"),
       emphasis: emphasis,
       help: try optTextSource(path, f, "help"))
@@ -172,7 +172,7 @@ extension Decode {
   static func progressSpec(_ path: String, _ j: JSON) throws -> ProgressSpec {
     let f = try object(path, j)
     return ProgressSpec(
-      fraction: try reqBinding(path, f, "fraction"),
+      fraction: try reqBindingSlot(path, f, "fraction", .float),
       // 0.2.0 — omitted-when-default (false).
       indeterminate: try optBool(path, f, "indeterminate") ?? false,
       tone: try optToneDefault(path, f, "tone"),
@@ -212,8 +212,8 @@ extension Decode {
     return DrawStyle(
       fill: try optBindingSlot(path, f, "fill", .str),
       stroke: try optBindingSlot(path, f, "stroke", .str),
-      strokeWidth: try optBinding(path, f, "strokeWidth"),
-      opacity: try optBinding(path, f, "opacity"),
+      strokeWidth: try optBindingSlot(path, f, "strokeWidth", .float),
+      opacity: try optBindingSlot(path, f, "opacity", .float),
       textAnchor: textAnchor,
       fontSize: try optFloat(path, f, "fontSize"),
       emphasis: emphasis,
@@ -353,7 +353,7 @@ extension Decode {
     case "Text":
       return .text(value: try valueOr(.str, ControlValueDefaults.text), onChange: onChange)
     case "Number":
-      return .number(value: try valueOr(.untyped, ControlValueDefaults.number), onChange: onChange)
+      return .number(value: try valueOr(.float, ControlValueDefaults.number), onChange: onChange)
     case "Checkbox":
       return .checkbox(
         value: try valueOr(.bool, ControlValueDefaults.checkbox), onToggle: onToggle)
@@ -382,7 +382,7 @@ extension Decode {
         step: try optFloat(path, f, "step"), onChange: onChange)
     case "RangedNumber":
       return .rangedNumber(
-        value: try valueOr(.untyped, ControlValueDefaults.number),
+        value: try valueOr(.float, ControlValueDefaults.number),
         min: try optFloat(path, f, "min"),
         max: try optFloat(path, f, "max"), step: try optFloat(path, f, "step"),
         onChange: onChange)
@@ -860,7 +860,7 @@ extension Decode {
     }
     let activeIndex: Binding
     if let v = f["activeIndex"] {
-      activeIndex = try binding("\(path).activeIndex", v)
+      activeIndex = try bindingSlot("\(path).activeIndex", v, .int)
     } else {
       activeIndex = .staticValue(.ast(.number(0)))
     }
@@ -885,7 +885,8 @@ extension Decode {
   static func stepperSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> StepperSpec {
     let f = try object(path, j)
     return StepperSpec(
-      activeStep: try reqBinding(path, f, "activeStep"), children: try children(path, f, walk))
+      activeStep: try reqBindingSlot(path, f, "activeStep", .int),
+      children: try children(path, f, walk))
   }
 
   static func summaryListSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> SummaryListSpec {

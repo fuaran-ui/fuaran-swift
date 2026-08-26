@@ -437,17 +437,76 @@ extension Decode {
     }
   }
 
+  /// The cross-field operand: an operator plus a `Binding` to compare against.
+  static func compareRule(_ path: String, _ j: JSON) throws -> CompareRule {
+    let f = try object(path, j)
+    return CompareRule(
+      op: try bareEnum("\(path).op", try req(path, f, "op"), "CompareOp"),
+      against: try reqBinding(path, f, "against"))
+  }
+
+  /// A field's declared constraint. Every slot is optional structurally, and
+  /// two shapes are refused here as POLICY (mirroring the reference host):
+  ///
+  /// - a rule with every constraint slot absent. A rule that constrains nothing
+  ///   is a defect, not a no-op: it decodes, validates and renders while
+  ///   declaring nothing — the fake-affordance shape the near-miss set also
+  ///   forecloses, arriving through an empty object instead of a wrong key.
+  ///   `message` alone does not rescue it: the message is the prose shown when
+  ///   some OTHER slot is unmet.
+  /// - `minLength` above `maxLength`. An inverted bound admits no value at all,
+  ///   so the field could never be submitted and the form is dead on arrival.
+  ///
+  /// Neither is a shape — both are relations BETWEEN slots — which is why they
+  /// live here rather than in the structural layer.
+  static func fieldRule(_ path: String, _ j: JSON) throws -> FieldRule {
+    let f = try object(path, j)
+    var format: TextFormat? = nil
+    if let v = f["format"] { format = try bareEnum("\(path).format", v, "TextFormat") }
+    let pattern = try optString(path, f, "pattern")
+    let minLength = try optInt(path, f, "minLength")
+    let maxLength = try optInt(path, f, "maxLength")
+    var compare: CompareRule? = nil
+    if let v = f["compare"] { compare = try compareRule("\(path).compare", v) }
+    let message = try optTextSource(path, f, "message")
+
+    if format == nil && pattern == nil && minLength == nil && maxLength == nil && compare == nil {
+      throw err(
+        .wrongType, path,
+        "a rule that constrains nothing is a defect, not a no-op — declare at least one of "
+          + "format / pattern / minLength / maxLength / compare, or omit 'rule' entirely")
+    }
+    if let lo = minLength, let hi = maxLength, lo > hi {
+      throw err(
+        .wrongType, path,
+        "minLength \(lo) is above maxLength \(hi) — an inverted length bound admits no value "
+          + "at all, so the field could never be submitted")
+    }
+    return FieldRule(
+      format: format, pattern: pattern, minLength: minLength, maxLength: maxLength,
+      compare: compare, message: message)
+  }
+
   static func formField(_ path: String, _ j: JSON) throws -> FormField {
     let f = try object(path, j)
+    // The near-miss check runs BEFORE the rule decode, so a field carrying both
+    // `validation` and a well-formed `rule` still names the ignored key rather
+    // than passing silently.
+    try refuseNearMiss(
+      path, f,
+      [("validation", "rule"), ("constraints", "rule"), ("validate", "rule")])
     // Field alias: name → id. Id decodes first so the form context's auto-bind
     // can use it (Phase 596).
     let id = try reqStringAliased(path, f, "id", ["name"])
+    var rule: FieldRule? = nil
+    if let v = f["rule"] { rule = try fieldRule("\(path).rule", v) }
     return FormField(
       id: id,
       kind: try formFieldKind(.formFieldId(id), "\(path).kind", try req(path, f, "kind")),
       label: try reqTextSource(path, f, "label"),
       required: try reqBool(path, f, "required"),
-      help: try optTextSource(path, f, "help"))
+      help: try optTextSource(path, f, "help"),
+      rule: rule)
   }
 
   static func formSpec(_ path: String, _ j: JSON) throws -> FormSpec {

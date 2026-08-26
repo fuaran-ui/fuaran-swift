@@ -259,12 +259,37 @@ public enum FormFieldKind: Equatable, Sendable {
     onChange: Closure?)
 }
 
+/// The cross-field operand. `against` is a `Binding`, and that IS the
+/// cross-field mechanism rather than an accident of typing: any read slot may
+/// take a Binding, and the auto-bind rule already puts every form field's value
+/// in State under the field's own id, so `{"$type":"State","key":"<sibling id>"}`
+/// reads the sibling with no coordination vocabulary at all.
+public struct CompareRule: Equatable, Sendable {
+  public var op: CompareOp
+  public var against: Binding
+}
+
+/// A field's declared constraint — the ACCEPTED SET, where `FormFieldKind`
+/// names the control. Every slot is optional structurally; the two
+/// well-formedness refusals (a rule that constrains nothing; `minLength` above
+/// `maxLength`) are relations BETWEEN slots and so live in the decoder's policy
+/// layer rather than in this shape.
+public struct FieldRule: Equatable, Sendable {
+  public var format: TextFormat?
+  public var pattern: String?
+  public var minLength: Int?
+  public var maxLength: Int?
+  public var compare: CompareRule?
+  public var message: TextSource?
+}
+
 public struct FormField: Equatable, Sendable {
   public var id: String
   public var kind: FormFieldKind
   public var label: TextSource
   public var required: Bool
   public var help: TextSource?
+  public var rule: FieldRule?
 }
 
 public struct FormSpec: Equatable, Sendable {

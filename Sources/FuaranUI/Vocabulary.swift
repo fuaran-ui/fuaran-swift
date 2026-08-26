@@ -255,3 +255,13 @@ public enum WindowFn: String, CaseIterable, Equatable, Sendable {
 public enum SortDir: String, CaseIterable, Equatable, Sendable {
   case asc, desc
 }
+
+/// `FieldRule.format` — the closed named-format set a text field's value is held to.
+public enum TextFormat: String, CaseIterable, Equatable, Sendable {
+  case email, url, tel
+}
+
+/// `CompareRule.op` — the cross-field comparison operator.
+public enum CompareOp: String, CaseIterable, Equatable, Sendable {
+  case eq, neq, lt, lte, gt, gte
+}

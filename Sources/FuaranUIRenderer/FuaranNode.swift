@@ -430,7 +430,25 @@
         if let subtext = k.subtext {
           Text(ctx.resolveText(subtext)).font(.caption2).foregroundStyle(.secondary)
         }
-        if let trend = k.trend { Text(ctx.resolve(trend)).font(.caption2) }
+        if let trend = k.trend {
+          // Phase 867 §3.6.1 — the trend reads through its declared polarity.
+          // The numeric text is UNCHANGED by that reading; what the sentiment
+          // adds is a colour and a glyph beside it. `k.tone` is not consulted
+          // here and is not written to: the palette entries below are selected
+          // by SENTIMENT, so an emitter's deliberate `Critical` tile survives a
+          // metric that is improving from a bad place.
+          let text = ctx.resolve(trend)
+          let sentiment = trendSentiment(k.trendPolarity, resolvedTrend: text)
+          HStack(spacing: 3) {
+            if let s = sentiment {
+              Text(s.glyph)
+                .font(.caption2)
+                .accessibilityLabel(s.accessibilityLabel)
+            }
+            Text(text).font(.caption2)
+          }
+          .foregroundStyle(trendTint(sentiment, tones))
+        }
       }
       .padding(4)
     }

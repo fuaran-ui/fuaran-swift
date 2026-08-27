@@ -265,3 +265,26 @@ public enum TextFormat: String, CaseIterable, Equatable, Sendable {
 public enum CompareOp: String, CaseIterable, Equatable, Sendable {
   case eq, neq, lt, lte, gt, gte
 }
+
+/// `Metric.trendPolarity` — which way the measured quantity IMPROVES
+/// (WIRE_FORMAT.md §3.6.1). Distinct from `tone`, which says how the reading
+/// STANDS: a host derives neither from the other, and nothing here ever writes
+/// back to `tone`.
+///
+/// **`Neutral` is reserved by the specification and is deliberately NOT a case
+/// here.** The case set IS the accepted wire set, so omitting it means
+/// `"Neutral"` fails `UNKNOWN_DU_CASE` naming the two legal spellings, rather
+/// than this surface quietly deciding a question the reservation holds open.
+/// That is the same modelling choice the Rust reference core made for the same
+/// slot, and it is why the wire slot is an enum rather than an `inverted` bool:
+/// admitting the third case later is one added case plus a compiler error at
+/// every site that must then decide what it means.
+///
+/// No alias arm is registered, and that omission is deliberate: the obvious
+/// candidates are precisely the spellings that must not be accepted — `Neutral`
+/// would pre-empt the reservation, and `Inverted` / `Descending` would reinstate
+/// the boolean spelling §3.6.1 refuses.
+public enum TrendPolarity: String, CaseIterable, Equatable, Sendable {
+  case higherIsBetter = "HigherIsBetter"
+  case lowerIsBetter = "LowerIsBetter"
+}

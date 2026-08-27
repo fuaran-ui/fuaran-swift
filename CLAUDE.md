@@ -170,6 +170,47 @@ are wired and the rest are inert by construction — which is a render floor, no
 a disabled control drops no input. The failure mode to avoid is a *live* control that quietly
 fails to commit; the sibling Kotlin host shipped exactly that in five arms (Phase 667).
 
+## Trend sentiment projection — `tone` and `trendPolarity` are not the same judgement
+
+`Metric` carries two slots that both look like judgements about a number, and `WIRE_FORMAT.md`
+§3.6.1 exists because they are not. **`tone` says how the reading STANDS and colours the TILE;
+`trendPolarity` says which way the quantity IMPROVES and reaches the TREND element alone.** A host
+derives neither from the other. The projection lives in
+`Sources/FuaranUIRenderer/TrendSentiment.swift`; the decisions are here.
+
+- **Sentiment is `sign(trend) × polarity`** — `HigherIsBetter` is `+1`, `LowerIsBetter` is `−1`. A
+  falling −7.34% reads as an *improvement* under `LowerIsBetter`, and the numeric text — its sign
+  included — is identical either way. Polarity changes how the number READS, never what it SAYS.
+- **Nothing writes back to `tone`.** A surface that inferred "improving ⇒ tile is Success" would
+  re-create in the render the exact conflation the wire slot exists to remove, and would override an
+  emitter's deliberate `Critical` on a metric improving from a bad place. There is no path from
+  `TrendSentiment.swift` to a `ToneVariant`, by construction rather than by discipline.
+- **The structural intent transfers from the reference tiers; their CSS constraint does not.** Those
+  tiers emit `fuaran-metric-trend-{improving,regressing,unchanged}` class modifiers plus a glyph
+  carrying an `aria-label`. SwiftUI has no class vocabulary, so what crosses is the PAIR — a
+  sentiment and a non-colour channel for it — projected into this platform's idiom: a
+  `foregroundStyle` drawn from the tone palette *by sentiment* (never from the node's `tone`), and
+  an `.accessibilityLabel` on the glyph. Colour alone fails WCAG 1.4.1, so the glyph is not
+  decoration; §3.6.1 makes discharging that obligation non-optional while leaving HOW to the surface.
+- **The label is on the GLYPH, not the trend view.** On the view it would OVERRIDE the element's
+  text and assistive technology would hear "improving" and lose the number. The reference tiers
+  place it the same way and record the same reason.
+- **`Neutral` is reserved by the specification and is deliberately NOT a case** of `TrendPolarity`.
+  The case set IS the accepted wire set, so `"Neutral"` fails `UNKNOWN_DU_CASE` naming the two legal
+  spellings rather than this surface quietly deciding a question the reservation holds open — and no
+  `switch` carries a dead arm waiting for a case the wire will not produce. No alias arm is
+  registered: the obvious candidates (`Neutral`, `Inverted`, `Descending`) are precisely the
+  spellings that must not be accepted.
+- **An unparseable resolved trend yields NO sentiment**, matching the reference renderers' unresolved
+  branch (an unclassed trend element, no glyph). Inventing one would be a claim about a number
+  nobody has.
+
+**Forward-coupling.** A change to the composition rule, the sentiment set, or the glyph vocabulary
+updates this table, `TrendSentiment.swift`, and
+`Tests/FuaranUIRendererTests/TrendSentimentTests.swift` in the same change. As with the
+accessibility projection, the decisions sit **outside** `#if canImport(SwiftUI)` so they are
+asserted on every platform — only the colour half is Apple-gated.
+
 ## Accessibility projection — the mapping, and what is dropped
 
 A node's `Accessibility` trait carries six slots. The HTML render tiers project them into `aria-*`

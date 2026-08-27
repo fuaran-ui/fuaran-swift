@@ -26,6 +26,9 @@ extension Decode {
       emphasis: try optEmphasisDefault(path, f, "emphasis"),
       trend: try optBindingSlot(path, f, "trend", .float),
       trendFormat: trendFormat,
+      // Phase 867 §3.6.1 — omitted-when-default, decoded independently of
+      // `trend`; an inert declaration round-trips rather than being dropped.
+      trendPolarity: try optTrendPolarityDefault(path, f, "trendPolarity"),
       icon: try optString(path, f, "icon"),
       subtext: try optTextSource(path, f, "subtext"))
   }

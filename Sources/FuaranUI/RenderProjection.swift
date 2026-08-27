@@ -297,6 +297,17 @@ enum Decode {
     return try bareEnum("\(path).\(key)", v, "StyleWeight")
   }
 
+  /// §3.6.1 — absent is `HigherIsBetter`. An unrecognised spelling (`Neutral`
+  /// included, and on purpose) still fails `UNKNOWN_DU_CASE` with the canonical
+  /// two-name list, because `bareEnum` builds its expected list from the case
+  /// set and the case set is the accepted wire set.
+  static func optTrendPolarityDefault(_ path: String, _ f: [String: JSON], _ key: String) throws
+    -> TrendPolarity
+  {
+    guard let v = f[key] else { return .higherIsBetter }
+    return try bareEnum("\(path).\(key)", v, "TrendPolarity")
+  }
+
   static func optEmphasisDefault(_ path: String, _ f: [String: JSON], _ key: String) throws
     -> Emphasis
   {

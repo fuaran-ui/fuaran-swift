@@ -91,8 +91,10 @@ extension Decode {
 
   static func linkSpec(_ path: String, _ j: JSON) throws -> LinkSpec {
     let f = try object(path, j)
-    // `protection` is an optional closed enumeration — an unknown case is
-    // UNKNOWN_DU_CASE at `$.kind.protection` (the corpus reject family pins it).
+    // `protection` is an optional closed BARE enumeration — a plain string, no
+    // `$type` on the wire — so an unknown case is UNKNOWN_DU_CASE at
+    // `$.kind.protection`, with no `.$type` suffix (Phase 1073; the corpus
+    // reject family pins exactly that path).
     let protection: LinkProtection? =
       try f["protection"].map { try bareEnum("\(path).protection", $0, "LinkProtection") }
     return LinkSpec(
@@ -585,14 +587,15 @@ extension Decode {
   /// reader here is precisely how this position would come to accept a vocabulary the
   /// `tone` field does not.
   ///
-  /// The refusal is RE-ISSUED rather than passed through. `unknownCase` reports at
-  /// `<path>.$type` with "unknown discriminator", and a map value is neither a
-  /// discriminator nor at a `$type` key — so the raw error names a path the document
-  /// does not contain, which is actively misleading. The re-issue keeps the code and
-  /// the seven legal names and points at the offending KEY, because "one of your
-  /// tones is wrong" is not an actionable report when the map has nine entries. A
-  /// non-string value is a `wrongType` and already reports at the right path, so it
-  /// passes through untouched.
+  /// The refusal is RE-ISSUED rather than passed through, for the MESSAGE rather than
+  /// the path. `unknownEnumCase` now reports at the entry's own path (Phase 1073), so
+  /// the location is already right; what the raw error still says is "unknown
+  /// discriminator", and a map value is neither a discriminator nor a `ToneVariant`
+  /// slot by name. The re-issue keeps the code and the seven legal names, names the
+  /// offending KEY and says what it should have been, because "one of your tones is
+  /// wrong" is not an actionable report when the map has nine entries. A non-string
+  /// value is a `wrongType` and already reports correctly, so it passes through
+  /// untouched.
   static func toneMap(_ path: String, _ j: JSON) throws -> [String: ToneVariant] {
     let f = try object(path, j)
     var out: [String: ToneVariant] = [:]
@@ -853,7 +856,7 @@ extension Decode {
     let f = try object(path, j)
     let roleStr = try string("\(path).role", try req(path, f, "role"))
     guard let role = BoxRole(rawValue: roleStr) else {
-      throw unknownCase("\(path).role", roleStr, "Group | Card | Dashboard | Separator")
+      throw unknownEnumCase("\(path).role", roleStr, "Group | Card | Dashboard | Separator")
     }
     return BoxSpec(
       children: try children(path, f, walk),
@@ -999,7 +1002,7 @@ extension Decode {
     let f = try object(path, j)
     let strictnessStr = try reqString(path, f, "strictness")
     guard let strictness = HashStrictness(rawValue: strictnessStr) else {
-      throw unknownCase(
+      throw unknownEnumCase(
         "\(path).strictness", strictnessStr, "StrictReplay | AdvisoryWarning | Enforced")
     }
     return ContentHash(
@@ -1064,11 +1067,11 @@ extension Decode {
     let f = try object(path, j)
     let hostStr = try reqString(path, f, "hostEffect")
     guard let host = HostEffect(rawValue: hostStr) else {
-      throw unknownCase("\(path).hostEffect", hostStr, "Pure | ReadsHost | WritesHost")
+      throw unknownEnumCase("\(path).hostEffect", hostStr, "Pure | ReadsHost | WritesHost")
     }
     let detStr = try reqString(path, f, "determinism")
     guard let det = DeterminismSource(rawValue: detStr) else {
-      throw unknownCase(
+      throw unknownEnumCase(
         "\(path).determinism", detStr, "Deterministic | Clock | Random | Network")
     }
     return EffectClass(hostEffect: host, determinism: det)
@@ -1214,7 +1217,7 @@ extension Decode {
       let channelObj = try object("\(path).channel", try req(path, f, "channel"))
       let dirStr = try reqString("\(path).channel", channelObj, "direction")
       guard let direction = ChannelDirection(rawValue: dirStr) else {
-        throw unknownCase("\(path).channel.direction", dirStr, "OutOnly | TwoWay")
+        throw unknownEnumCase("\(path).channel.direction", dirStr, "OutOnly | TwoWay")
       }
       let caps = try array("\(path).capabilities", try req(path, f, "capabilities")).enumerated()
         .map { try string("\(path).capabilities[\($0.0)]", $0.1) }

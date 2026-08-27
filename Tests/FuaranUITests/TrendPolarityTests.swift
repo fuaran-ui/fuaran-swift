@@ -67,11 +67,17 @@ final class TrendPolarityTests: XCTestCase {
       else { return XCTFail("no expected-list in \(e.message)") }
       XCTAssertFalse(
         expectedList.contains("Neutral"), "the reserved case leaked into the expected list")
-      // The path carries this host's family-wide `.$type` suffix (see the
-      // reject-path note below); the corpus-stated prefix is what conformance
-      // matches on, and both halves are pinned so a divergence in THIS slot
-      // alone would go red.
-      XCTAssertTrue(e.path.hasPrefix("$.kind.trendPolarity"), "path was \(e.path)")
+      // `trendPolarity` is a BARE enum — a plain string in a named field, with
+      // no `$type` member in the document at that position — so the reject path
+      // is the field's own, with NO `.$type` suffix (Phase 1073;
+      // `WIRE_FORMAT.md` §6's suffix rule is conditioned on the discriminator
+      // being at fault, and here there is no discriminator on the wire to be at
+      // fault). Asserted by EQUALITY, deliberately: this host emitted
+      // `$.kind.trendPolarity.$type` from one helper serving both populations,
+      // and a PREFIX assertion — here and in the corpus reject harness alike —
+      // is exactly what let that divergence live unnoticed, because a spurious
+      // suffix passes a prefix match.
+      XCTAssertEqual(e.path, "$.kind.trendPolarity")
     }
   }
 

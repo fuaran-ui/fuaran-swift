@@ -39,8 +39,35 @@ enum Decode {
     err(.wrongType, path, "expected \(expected)")
   }
 
+  /// An unrecognised `$type` DISCRIMINATOR on a `$type`-tagged union. The
+  /// document literally carries a `"$type"` member at this position, so the
+  /// reject path names it — `WIRE_FORMAT.md` §6: "`$type` appears literally in
+  /// the path when the discriminator is at fault (e.g. `$.kind.$type`)".
+  ///
+  /// Use `unknownEnumCase` for a BARE enum instead — see the note there.
   static func unknownCase(_ path: String, _ got: String, _ expected: String) -> FuaranDecodeError {
     err(.unknownDuCase, "\(path).$type", "unknown discriminator '\(got)'; expected \(expected)")
+  }
+
+  /// An unrecognised case of a BARE enum — a plain JSON string in a named field
+  /// (`style.tone`, `kind.trendPolarity`, `kind.protection`,
+  /// `accessibility.liveRegion`, a `defaultSort.direction`, a
+  /// `channel.direction`), with NO `$type` member in the document at that
+  /// position. Same `UNKNOWN_DU_CASE` code; the path is the FIELD's own.
+  ///
+  /// The `.$type` suffix is deliberately absent, and that is the whole point of
+  /// this being a second helper (Phase 1073). §6's sentence above is conditioned
+  /// on the discriminator being at fault; a bare enum has no discriminator on
+  /// the wire, so `$.style.tone.$type` names a JSON member the document does not
+  /// contain — an author reading the refusal has nowhere to go and edits a key
+  /// that is not there. The conformance corpus already records the distinction
+  /// correctly; this host emitted one shape for both populations and the
+  /// divergence survived only because the reject harness matches the expected
+  /// path by PREFIX, under which a spurious suffix reads as a pass.
+  static func unknownEnumCase(_ path: String, _ got: String, _ expected: String)
+    -> FuaranDecodeError
+  {
+    err(.unknownDuCase, path, "unknown discriminator '\(got)'; expected \(expected)")
   }
 
   /// Lenient AI-ingest (§3.6, generalised): a `Static` envelope wrapped around
@@ -158,7 +185,9 @@ enum Decode {
     if let v = T(rawValue: s) { return v }
     if let v = aliases[s] { return v }
     let names = T.allCases.map { $0.rawValue }.joined(separator: " | ")
-    throw unknownCase(path, s, "\(label): \(names)")
+    // A bare enum, by construction — this reader consumes a plain string, never
+    // a `$type` object — so the refusal reports at the FIELD's own path.
+    throw unknownEnumCase(path, s, "\(label): \(names)")
   }
 
   // ── Curated lenient enum decoders (mirroring the reference host) ──────────

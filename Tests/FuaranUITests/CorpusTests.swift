@@ -197,6 +197,11 @@ final class CorpusTests: XCTestCase {
   /// message; the prefix rule keeps the assertion strict about *where* without
   /// pinning a suffix the spec does not fix.
   ///
+  /// **Plus one ruled exception to that latitude (Phase 1073):** where the corpus
+  /// does NOT record a `.$type` suffix, the emitted path must not carry one
+  /// either. The comment on that branch below says why the prefix rule structurally
+  /// cannot express it.
+  ///
   /// **Two documented, justified exclusions** — neither a filter over the reject
   /// family, both a decoder that does not exist on this surface:
   ///
@@ -231,6 +236,31 @@ final class CorpusTests: XCTestCase {
         } else if !e.path.hasPrefix(expectedPath) {
           failures.append(
             "\(fx.id): wrong path — expected prefix \(expectedPath), got \(e.path)")
+        } else if !expectedPath.hasSuffix(".$type"), e.path.hasSuffix(".$type") {
+          // Phase 1073 — the ruled bare-enum reject-path spelling, pinned across the
+          // whole reject family.
+          //
+          // The prefix check above structurally CANNOT catch a spurious `.$type`: a
+          // decoder reporting `$.style.tone.$type` where the corpus says
+          // `$.style.tone` satisfies the prefix and passes — which is how the
+          // divergence survived here for the corpus's whole life. Prefix matching
+          // stays: several fixtures legitimately name a position DEEPER than the
+          // corpus's stated slot (a decoder reporting `$.kind.trend.value` against a
+          // recorded `$.kind.trend`; the §21 limit fixtures, where the corpus records
+          // `$` for the refused document while a host names where the limit broke).
+          // Being MORE precise than the corpus is over-specifying, not diverging.
+          //
+          // What this guard pins is the different defect: a suffix naming a position
+          // that does not exist in the document at all. WIRE_FORMAT.md §6 — `$type`
+          // appears literally in the path when the DISCRIMINATOR is at fault. A bare
+          // enum carries no discriminator on the wire, so the suffix named a JSON
+          // member the document does not contain, and an author reading the refusal
+          // has nowhere to go. The corpus already distinguishes the two populations,
+          // so its own recorded expectation is the oracle.
+          failures.append(
+            "\(fx.id): spurious `.$type` — the corpus expects \(expectedPath) (a bare-enum "
+              + "position, no discriminator on the wire), got \(e.path). Use `unknownEnumCase`, "
+              + "not `unknownCase` — see WIRE_FORMAT.md §6.")
         }
       } catch {
         failures.append("\(fx.id): threw an untyped error \(error) (expected FuaranDecodeError)")

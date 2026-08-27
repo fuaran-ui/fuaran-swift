@@ -90,6 +90,7 @@ public indirect enum NodeKind: Equatable, Sendable {
   case labelValueRow(LabelValueRowSpec)
   case link(LinkSpec)
   case image(ImageSpec)
+  case media(MediaSpec)
   case list(ListSpec)
   case toast(ToastSpec)
   case codeBlock(CodeBlockSpec)
@@ -137,6 +138,7 @@ public indirect enum NodeKind: Equatable, Sendable {
     case .labelValueRow: return "LabelValueRow"
     case .link: return "Link"
     case .image: return "Image"
+    case .media: return "Media"
     case .list: return "List"
     case .toast: return "Toast"
     case .codeBlock: return "CodeBlock"
@@ -165,7 +167,8 @@ public indirect enum NodeKind: Equatable, Sendable {
     case .box, .splitPanel, .tabs, .stepper, .summaryList, .disclosure, .modal, .scrollArea:
       return .layout
     case .heading, .markdown, .metric, .badge, .sparkline, .callout, .progress, .skeleton,
-      .icon, .fact, .labelValueRow, .link, .image, .list, .toast, .codeBlock, .math, .drawing:
+      .icon, .fact, .labelValueRow, .link, .image, .media, .list, .toast, .codeBlock, .math,
+      .drawing:
       return .display
     case .form, .filters, .button, .fileUpload, .select:
       return .input

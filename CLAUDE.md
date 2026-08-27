@@ -38,8 +38,13 @@ fuaran-swift/
 │   ├── Specs.swift               # per-kind spec records + Drawing vector-graphics vocabulary
 │   ├── Node.swift                # Node envelope + closed NodeKind (+ exhaustive typeName/category)
 │   └── RenderProjection*.swift   # the render-projection decoder (canonical tree JSON → sealed model)
+├── Sources/FuaranUIRenderer/
+│   ├── MediaPlayback.swift       # the media playback projection (the three §3.6.6 obligations)
+│   ├── ImagePresentation.swift   # the image presentation projection (§3.6.2–§3.6.5)
+│   └── …                         # Accessibility / TrendSentiment / FuaranNode / Theme / Drawing*
 ├── Tests/FuaranUITests/
 │   ├── CorpusTests.swift         # corpus render-coverage harness (per-kind coverage report)
+│   ├── MediaVocabularyTests.swift  # the media-wave decode leg, corpus-independent
 │   └── ModelTests.swift          # focused decode checks (corpus-independent)
 ├── Package.swift
 ├── run.ps1                       # Stage-0 entry point
@@ -110,6 +115,13 @@ resolves a `State` / `Query` / `Format` slot, so a decode-time allowlist would b
 placeholder, and filtering during decode would also stop the projection being a faithful view of
 the wire. The consumer obligations are stated in the README's "Safety floor" section; keep them
 there (they are what a consumer reads) rather than only here.
+
+**Four positions, not one.** `Link.href`, `Image.src`, `Media.src`, the `Video` variant's `poster`
+and every `Image.srcSet` candidate all reach the floor, and the last three are the ones worth
+naming: they are fetched with **no user act at all**, so a slot of that shape that skipped the floor
+would be a documented way around it. Accessors exist for each (`sanitizedSrc` on `MediaSpec` and
+`SrcSetEntry`, `sanitizedPoster` on `MediaSpec`), and what a refusal *costs* differs per position —
+see "Image presentation" and "Media playback" above.
 
 A renderer arm that ever *does* resolve a URL onward — a real image loader, a tappable link — must
 route it through `FuaranUrlPolicy.sanitize` in the same change that adds it. This is the same
@@ -210,6 +222,90 @@ updates this table, `TrendSentiment.swift`, and
 `Tests/FuaranUIRendererTests/TrendSentimentTests.swift` in the same change. As with the
 accessibility projection, the decisions sit **outside** `#if canImport(SwiftUI)` so they are
 asserted on every platform — only the colour half is Apple-gated.
+
+## Media playback — three obligations the wire states NORMATIVELY
+
+`Media` (§3.6.6) is one kind with a `MediaKind` variant (`Video` carrying `autoplay` + an optional
+`poster`, `Audio` carrying neither). Three of its rules are **normative render obligations**, not
+defaults a surface may choose differently, and each is one a surface would get wrong while
+round-tripping the bytes perfectly. The projection is
+`Sources/FuaranUIRenderer/MediaPlayback.swift`; the decisions are here.
+
+- **The accessible name, ALWAYS.** `label` is mandatory on the wire and a transport has no
+  decorative case, so unlike `Image`'s `alt` there is no branch. **What there IS is a precedence:**
+  a node-level `Accessibility.label` wins, because it is the author naming this instance something
+  else. On this surface that falls out of the render spine — `fuaranNodeBody` applies the node
+  projection *after* the kind arm, and a later `.accessibilityLabel` replaces an earlier one — so
+  the arm applies the spec label unconditionally and the trait overrides it. The reference host
+  reaches the same precedence by the *opposite* mechanism (it serialises attributes to text, where a
+  duplicate resolves FIRST-wins, so it emits the spec label only when the node-level attributes
+  carry none). **Do not port that host's conditional here**: suppressing the label when a trait is
+  present would invert the precedence on SwiftUI rather than preserve it.
+- **`autoplay` never without muted, in BOTH directions.** `MediaPlaybackPlan.muted` is a *computed*
+  property returning `autoplay`, so the failing combination is unrepresentable rather than asserted
+  — the same argument the wire makes for carrying no `muted` slot, applied to the type. Muting a
+  video the reader pressed play on is the same defect in the other direction, which is why the
+  property is derived rather than merely defaulted.
+- **`Audio` has NO autoplay pathway**, and the guarantee is the CASE SET: `MediaKind.audio` carries
+  no associated value, so a document's `{"$type":"Audio","autoplay":true}` decodes to an audio
+  surface that does not autoplay because the value has nowhere to land — and the plan builder's
+  `.audio` branch has nothing to read, so no later edit *there* can start honouring it. Note the
+  document is not refused: the slot does not exist on that variant, its presence is not malformed.
+  `MediaPlaybackPlan` has no public initialiser for the same reason — a memberwise init would let a
+  caller hand `autoplay: true` to an audio plan, re-opening by an initialiser what the sealed enum
+  closes by its cases.
+
+**Forward-coupling.** A third `MediaKind` variant, a change to the pairing rule, or a new
+`MediaSpec` slot updates this section, `MediaPlayback.swift`, the render arm in `FuaranNode.swift`,
+and `Tests/FuaranUIRendererTests/MediaPlaybackTests.swift` in the same change. The projection sits
+**outside** `#if canImport(SwiftUI)` so the obligations are asserted on every platform; only the
+view application is Apple-gated.
+
+**The render-leg boundary, stated honestly.** The SwiftUI floor has **no player** — the arm is a
+labelled transport placeholder reporting the declarations it would honour. That boundary is smaller
+than it looks: the obligations are decisions about what a surface *may* do, all three are
+discharged in the plan, and all three are asserted on every platform. What waits is the playback
+element (an `AVPlayer`-backed arm), not the contract. The arm that gains one reads `plan.muted`
+wherever it states muting and inherits the pairing unchanged.
+
+## Image presentation — the two orders, and what a refusal costs
+
+`ImageSpec` carries six slots past `variant` (§3.6.2–§3.6.5). The projection is
+`Sources/FuaranUIRenderer/ImagePresentation.swift`; four decisions live here.
+
+- **There are TWO orders for `srcSet`, and they are different orders.** The wire preserves
+  **authored** order — canonicalisation sorts object keys and never array elements, so a codec that
+  sorted would emit bytes differing from what it decoded. The **renderer** presents ascending by
+  width so its output is canonical for a given tree. Both are true because the sort lives in
+  `imagePresentationPlan` and never in the decoder. The corpus fixture is authored *descending*
+  precisely so a host that conflated them fails.
+- **A refused candidate is dropped; a refused primary source is not.** The primary must exist, so it
+  collapses to a refusal state the arm renders. A candidate has no such obligation, and offering a
+  client a rendition guaranteed to fail is worse than offering it one fewer. Flooring happens
+  *before* the ordering, so a refused candidate never occupies a position.
+- **`expandable` over a refused `src` emits NO affordance.** The same rule turned on the anchor: a
+  link to nothing is a dead control. The plan therefore carries `expansion: String?` *and*
+  `expansionRefused: Bool`, because "no expansion declared" and "expansion declared over a refused
+  source" are different facts and an `expansion == nil` test alone cannot tell them apart. The
+  target is the **primary** source, never a candidate — a surface that put a thumbnail behind the
+  link would pass every structural check and defeat the feature.
+- **`aspectRatio` reserves a box; `fit` decides what happens to pixels that do not match it.**
+  Independent by contract, neither derived from the other, so they project as two values rather than
+  one content mode. The reservation is a *layout-pass* obligation here — settled without script,
+  hydration or a loaded image — which is this platform's form of the CSS-only obligation §3.6.2
+  states, and it is testable today even though the picture is not.
+
+**One slot is carried and NOT acted on: `loading`.** The floor has no network image loader, so there
+is no fetch to defer, and a surface claiming to honour `Lazy` would be claiming something it does
+not do. It is projected rather than dropped so the arm that gains a loader inherits the declaration
+instead of rediscovering the slot. `Eager` is not the unoptimised value — deferring an above-the-fold
+image delays first paint rather than helping it — so a loader arriving here must not infer laziness
+from position or viewport.
+
+**Forward-coupling.** A new `ImageSpec` slot, a change to either order, or a change to what a
+refusal costs on any of the four URL positions updates this section, `ImagePresentation.swift`, the
+arm in `FuaranNode.swift`, and `Tests/FuaranUIRendererTests/ImagePresentationTests.swift` in the
+same change.
 
 ## Accessibility projection — the mapping, and what is dropped
 

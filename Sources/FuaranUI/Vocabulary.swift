@@ -94,6 +94,48 @@ public enum ImageVariant: String, CaseIterable, Equatable, Sendable {
   case rounded = "Rounded"
 }
 
+/// How the decoded pixels fill the box the layout gives the element (§3.6.2).
+/// Omitted on the wire at `Natural`.
+///
+/// A TOKEN, never a CSS value — the vocabulary is closed at three, so an
+/// author-supplied `object-fit` string has nowhere to land. That is the point:
+/// admitting one would put a free-form style value on the wire, which is the
+/// escape this format does not have.
+public enum ImageFit: String, CaseIterable, Equatable, Sendable {
+  case natural = "Natural"
+  case cover = "Cover"
+  case contain = "Contain"
+}
+
+/// The box the element reserves BEFORE the image arrives (§3.6.2). Omitted on
+/// the wire at `Natural`.
+///
+/// A LAYOUT reservation, not a crop — what happens to pixels that do not match
+/// the box is `ImageFit`'s statement, and neither is derived from the other.
+/// Four named ratios, never a number, a pair, or the stylesheet spelling
+/// (`"16 / 9"`, `"16:9"`, `1.7778`); the corpus's `reject-unknown-image-aspect`
+/// fixture pins that refusal at the bare slot.
+public enum ImageAspect: String, CaseIterable, Equatable, Sendable {
+  case natural = "Natural"
+  case square = "Square"
+  case fourThree = "FourThree"
+  case threeTwo = "ThreeTwo"
+  case sixteenNine = "SixteenNine"
+}
+
+/// Whether a fetching host loads the image during initial load or defers it
+/// (§3.6.2). Omitted on the wire at `Eager`.
+///
+/// `Eager` is the default deliberately, and it is not the "unoptimised" value:
+/// deferring an above-the-fold image delays the largest contentful paint rather
+/// than helping it, and only the author knows where the image sits. A host MUST
+/// NOT infer laziness from position, viewport, or anything else the tree does
+/// not say.
+public enum ImageLoading: String, CaseIterable, Equatable, Sendable {
+  case eager = "Eager"
+  case `lazy` = "Lazy"
+}
+
 /// Anti-scraper render strategy for a `Link` — `email` marks a `mailto:` link
 /// whose address must not appear in plaintext in emitted markup (the emission
 /// strategy is renderer-owned; a render projection may treat it as advisory).

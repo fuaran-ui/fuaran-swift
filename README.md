@@ -46,10 +46,14 @@ A decoded tree is **untrusted input**. It usually arrives from a model, and a mo
 emit a `Link` whose `href` is `javascript:…` or a `Navigate` whose `route` points somewhere you did
 not intend. Two obligations, and the first is the one that bites:
 
-**1. Never open a tree-supplied URL without the floor.** `LinkSpec.href`, `ImageSpec.src` and
+**1. Never open a tree-supplied URL without the floor.** `LinkSpec.href`, `ImageSpec.src`,
+`MediaSpec.src`, the `Video` variant's `poster`, every `ImageSpec.srcSet` candidate, and
 `Action.navigate(route:)` are handed to you exactly as the wire spelled them. Route every one
 through `FuaranUrlPolicy` before it reaches `UIApplication.open`, `NSWorkspace.open`, an
-`URLRequest`, or any web view you add:
+`URLRequest`, or any web view you add. **The media and `srcSet` slots deserve a separate mention
+because they are fetched with no user act at all** — nobody taps a poster frame or a responsive
+candidate — so a slot of that shape that skipped the floor would be a documented way around it.
+Accessors exist for each (`media.sanitizedSrc`, `media.sanitizedPoster`, `entry.sanitizedSrc`):
 
 ```swift
 switch link.sanitizedHref {                       // NOT link.href
@@ -68,6 +72,16 @@ backslash forms — `\\host`, `/\host` — which several URL parsers normalise b
 candidate is scrubbed of ASCII whitespace and control characters first, so `java\tscript:` is
 classified as `javascript:` and refused; a `hasPrefix("javascript:")` check of your own is not a
 floor.
+
+**What a refusal MEANS is not the same on every slot, and the difference is specified rather than
+left to you.** An element must have a source, so a refused `ImageSpec.src` / `MediaSpec.src` is a
+*state you render* — the picture or the player still appears, carrying whatever refusal marker your
+app shows — never a reason to drop the node. A slot with no such obligation simply *leaves*: a
+refused `srcSet` candidate is dropped from the candidate list, a refused `poster` is not shown (a
+video with no poster shows its first frame, which works; a poster at a refusal URL is a broken image
+over the player), and a refused `src` under `expandable` emits **no expansion affordance at all**,
+because a link to nothing is a dead control. The `ImagePresentationPlan` and `MediaPlaybackPlan`
+projections in `FuaranUIRenderer` apply all of this for you; read them rather than re-deriving it.
 
 **2. Do not build an HTML path for tree text.** This surface has no `WKWebView` and no
 HTML-parsing attributed-string path, and that absence is why it carries no script-injection sink at

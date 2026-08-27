@@ -223,6 +223,38 @@ extension ImageSpec {
   public var sanitizedSrc: SanitizedUrl { src.sanitizedUrl }
 }
 
+extension SrcSetEntry {
+  /// A `srcSet` candidate is a URL a client fetches with NO user act — the same
+  /// class as the primary `src`, and therefore the same obligation. A slot that
+  /// skipped the floor would be a documented way around it (§3.6.4).
+  ///
+  /// Note what a refusal MEANS here differs from the primary source's: a
+  /// candidate that fails the floor is DROPPED from the emitted list rather
+  /// than emitted in neutered form, because the primary `src` must exist so it
+  /// collapses to the refusal substitute, while a candidate has no such
+  /// obligation and offering a client a rendition guaranteed to fail is worse
+  /// than offering it one fewer.
+  public var sanitizedSrc: SanitizedUrl { src.sanitizedUrl }
+}
+
+extension MediaSpec {
+  /// `src` put through the URL floor. A media source is fetched with no user
+  /// act exactly as an image source is.
+  public var sanitizedSrc: SanitizedUrl { src.sanitizedUrl }
+
+  /// The `Video` poster put through the same floor; `nil` on `Audio` and on a
+  /// `Video` carrying no poster.
+  ///
+  /// The dropped-candidate rule of §3.6.4 applied to a single slot: a refused
+  /// poster simply LEAVES. A `<video>` with no poster shows its first frame,
+  /// which is a working rendering; a poster pointing at the refusal URL is a
+  /// broken image painted over the player.
+  public var sanitizedPoster: SanitizedUrl? {
+    guard case .video(_, let poster) = kind, let poster else { return nil }
+    return poster.sanitizedUrl
+  }
+}
+
 extension Action {
   /// For a `Navigate` action, its `route` put through the URL floor; `nil` for
   /// every other action. A `Navigate` route is always a literal on the wire, so

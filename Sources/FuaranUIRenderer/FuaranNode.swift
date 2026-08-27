@@ -99,6 +99,7 @@
     case .labelValueRow(let k): return AnyView(RenderLabelValueRow(k: k, ctx: ctx))
     case .link(let k): return AnyView(RenderLink(k: k, ctx: ctx))
     case .image(let k): return AnyView(RenderImage(k: k, ctx: ctx))
+    case .media(let k): return AnyView(RenderMedia(k: k, ctx: ctx))
     case .list(let k): return AnyView(RenderList(k: k, ctx: ctx))
     case .toast(let k): return AnyView(RenderToast(k: k, ctx: ctx))
     case .codeBlock(let k): return AnyView(RenderCodeBlock(code: k.code))
@@ -559,18 +560,140 @@
     }
   }
 
+  /// The image arm — the placeholder box, plus the §3.6.2–§3.6.5 presentation
+  /// projection from `ImagePresentation.swift`.
+  ///
+  /// The floor still has no network image loader, so the box is a label rather
+  /// than a picture. What the presentation slots buy even here is not cosmetic:
+  /// **`aspectRatio` reserves the box before any bytes arrive**, which on this
+  /// surface is `.aspectRatio(_:contentMode:)` on the placeholder — a CSS-only
+  /// obligation on an HTML host, and here likewise a layout-pass obligation
+  /// settled without script, hydration or a loaded image. The reservation is
+  /// what stops everything below the image moving later, and it is testable
+  /// today; the picture is what waits.
+  ///
+  /// **`caption` present means the figure BINDING**, so the container is one
+  /// accessibility element combining the image's own label with the caption
+  /// text — the SwiftUI form of `<figure>`/`<figcaption>` announcing together.
+  /// Absent, there is no wrapper at all: the arm returns the bare box a
+  /// pre-caption document always produced.
+  ///
+  /// **`expandable` renders a real, visible affordance or none.** With no
+  /// loader there is nothing to open in place, so the arm marks the expansion
+  /// and hands the target to the embedding app; what it must never do is show
+  /// the marker over a source the floor refused, which is why it reads
+  /// `plan.expansion` rather than `k.expandable`.
   private struct RenderImage: View {
     let k: ImageSpec
     let ctx: BindingContext
     var body: some View {
-      // Render floor has no network image loader — a labelled placeholder box.
       let alt = ctx.resolveText(k.alt)
-      Text(alt.isEmpty ? "image" : alt)
+      let plan = imagePresentationPlan(
+        k,
+        resolvedSrc: ctx.resolve(k.src),
+        resolvedCandidates: k.srcSet.map { (url: ctx.resolve($0.src), width: $0.width) },
+        resolvedCaption: k.caption.map { ctx.resolveText($0) })
+      let box =
+        Text(alt.isEmpty ? "image" : alt)
         .font(.system(size: 10))
         .foregroundStyle(.secondary)
         .frame(width: 72, height: 72)
         .background(Color.gray.opacity(0.08))
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.4), lineWidth: 1))
+        .overlay(alignment: .topTrailing) {
+          // The declared expansion, only where it has a working target.
+          if plan.expansion != nil {
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+              .font(.system(size: 8))
+              .padding(2)
+              .accessibilityLabel(Text("expand"))
+          }
+        }
+
+      // `fit` is what happens to pixels that do not match the box; `aspectRatio`
+      // is the box itself. Independent by contract — neither derived from the
+      // other — which is why the content mode and the ratio are applied from
+      // two separate slots.
+      let contentMode: ContentMode = plan.fit == .cover ? .fill : .fit
+      let sized = Group {
+        if let ratio = plan.aspectRatio.ratio {
+          box.aspectRatio(ratio, contentMode: contentMode)
+        } else {
+          box
+        }
+      }
+
+      if let caption = plan.caption {
+        VStack(alignment: .leading, spacing: 2) {
+          sized
+          Text(caption).font(.system(size: 10)).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+      } else {
+        sized
+      }
+    }
+  }
+
+  /// The media arm (§3.6.6) — the three NORMATIVE obligations, applied from the
+  /// plan in `MediaPlayback.swift` rather than re-derived here.
+  ///
+  /// The floor has no player, so this is a labelled transport placeholder
+  /// reporting the declarations it would honour. That boundary is worth naming
+  /// precisely, because it is smaller than it looks: the obligations are
+  /// decisions about WHAT a surface may do, and every one of them is discharged
+  /// in the plan and asserted on every platform. What waits is the playback
+  /// element, not the contract.
+  ///
+  ///   * the accessible name is applied ALWAYS — no branch, because the wire
+  ///     has no decorative case for a transport. A node-level
+  ///     `Accessibility.label` still wins, because `fuaranNodeBody` applies the
+  ///     node projection AFTER this view and a later `.accessibilityLabel`
+  ///     replaces an earlier one (see the precedence note in
+  ///     `MediaPlaybackPlan`).
+  ///   * `plan.muted` is read, never `plan.autoplay` alone, wherever muting is
+  ///     stated — the pairing is the declaration's meaning, and on this type it
+  ///     is not separately representable.
+  ///   * nothing here branches on autoplay for an audio surface, because an
+  ///     audio plan has no autoplay to branch on.
+  private struct RenderMedia: View {
+    let k: MediaSpec
+    let ctx: BindingContext
+    var body: some View {
+      let plan = mediaPlaybackPlan(
+        k,
+        resolvedLabel: ctx.resolveText(k.label),
+        resolvedSrc: ctx.resolve(k.src),
+        resolvedPoster: { () -> String? in
+          if case .video(_, let poster) = k.kind, let poster { return ctx.resolve(poster) }
+          return nil
+        }())
+      let glyph = plan.surface == .video ? "play.rectangle" : "waveform"
+      return HStack(spacing: 6) {
+        Image(systemName: glyph).font(.system(size: 14))
+        VStack(alignment: .leading, spacing: 1) {
+          Text(plan.accessibilityLabel).font(.system(size: 11))
+          Text(transportSummary(plan)).font(.system(size: 9)).foregroundStyle(.secondary)
+        }
+        Spacer(minLength: 0)
+      }
+      .padding(6)
+      .background(Color.gray.opacity(0.08))
+      .clipShape(RoundedRectangle(cornerRadius: 4))
+      .accessibilityLabel(Text(plan.accessibilityLabel))
+    }
+
+    /// The declarations the placeholder reports, in the plan's own vocabulary.
+    /// `muted` is listed beside `autoplay` and never on its own — a muted
+    /// declaration with no autoplay is the same defect in the other direction.
+    private func transportSummary(_ plan: MediaPlaybackPlan) -> String {
+      var parts: [String] = [plan.surface.rawValue]
+      if plan.source == nil { parts.append("source refused") }
+      if plan.controls { parts.append("controls") }
+      if plan.loop { parts.append("loop") }
+      if plan.autoplay { parts.append(plan.muted ? "autoplay muted" : "autoplay") }
+      if plan.poster != nil { parts.append("poster") }
+      return parts.joined(separator: " · ")
     }
   }
 
@@ -1036,8 +1159,8 @@
     case .mount(let k): return slotTrees(k.inputs)
     // Leaf / non-child-bearing kinds.
     case .heading, .markdown, .metric, .badge, .sparkline, .callout, .progress, .skeleton,
-      .icon, .fact, .labelValueRow, .link, .image, .list, .toast, .codeBlock, .math, .drawing,
-      .form, .filters, .button, .fileUpload, .select, .dataGrid, .chart, .map, .custom:
+      .icon, .fact, .labelValueRow, .link, .image, .media, .list, .toast, .codeBlock, .math,
+      .drawing, .form, .filters, .button, .fileUpload, .select, .dataGrid, .chart, .map, .custom:
       return []
     }
   }

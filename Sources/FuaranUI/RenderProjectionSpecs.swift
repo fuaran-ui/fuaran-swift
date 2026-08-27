@@ -106,12 +106,92 @@ extension Decode {
       protection: protection)
   }
 
+  /// §3.6.4 — one `srcSet` entry. `width` is checked for the POSITIVE floor
+  /// here, at decode, because the floor is a decode rule (a `0w` candidate is
+  /// one a client can never select). The refusal names the entry by INDEX, so
+  /// a corpus fixture that puts a well-formed entry first has to see the
+  /// second identified.
+  static func srcSetEntry(_ path: String, _ j: JSON) throws -> SrcSetEntry {
+    let f = try object(path, j)
+    let width = try reqInt(path, f, "width")
+    guard width >= 1 else {
+      throw wrongType("\(path).width", "a positive integer pixel width (>= 1)")
+    }
+    return SrcSetEntry(src: try reqBindingSlot(path, f, "src", .str), width: width)
+  }
+
   static func imageSpec(_ path: String, _ j: JSON) throws -> ImageSpec {
     let f = try object(path, j)
+    // §3.6.4 — absent MEANS the empty list. An explicit `null` is REFUSED
+    // (`WRONG_TYPE` at `$.kind.srcSet`) rather than read as absence: absence
+    // already has a spelling, and admitting a second would let two conformant
+    // hosts emit different canonical bytes for one document. `array` refuses a
+    // `.null` at exactly that path, so the refusal falls out of the reader
+    // rather than needing a branch of its own. AUTHORED ORDER is preserved —
+    // `map` over the parsed array, never a sort.
+    var srcSet: [SrcSetEntry] = []
+    if let v = f["srcSet"] {
+      srcSet = try array("\(path).srcSet", v).enumerated()
+        .map { try srcSetEntry("\(path).srcSet[\($0.0)]", $0.1) }
+    }
     return ImageSpec(
       alt: try reqTextSource(path, f, "alt"),
       src: try reqBindingSlot(path, f, "src", .str),
-      variant: try bareEnum("\(path).variant", try req(path, f, "variant"), "ImageVariant"))
+      variant: try bareEnum("\(path).variant", try req(path, f, "variant"), "ImageVariant"),
+      // §3.6.2 — bare enums, so an unknown token reports at the FIELD's own
+      // path with no `.$type` suffix (Phase 1073; `reject-unknown-image-aspect`
+      // pins it). Absent decodes to the identity default, which is what makes a
+      // pre-1077 document decode to today's behaviour.
+      fit: try f["fit"].map { try bareEnum("\(path).fit", $0, "ImageFit") } ?? .natural,
+      aspectRatio: try f["aspectRatio"].map {
+        try bareEnum("\(path).aspectRatio", $0, "ImageAspect")
+      } ?? .natural,
+      loading: try f["loading"].map { try bareEnum("\(path).loading", $0, "ImageLoading") }
+        ?? .eager,
+      // §3.6.3 — a TextSource, so the enveloped `{"$type":"Literal","text":…}`
+      // input canonicalises exactly as it does on `alt`.
+      caption: try optTextSource(path, f, "caption"),
+      srcSet: srcSet,
+      // §3.6.5 — a plain bool. A stringified boolean is REFUSED rather than
+      // coerced: a truthiness rule would have to rule on `"false"` and `""` as
+      // well, and two hosts ruling differently would disagree about whether a
+      // document declares an affordance at all.
+      expandable: try optBool(path, f, "expandable") ?? false)
+  }
+
+  /// §3.6.6 — the `MediaKind` variant, `$type`-discriminated at `kind.kind`.
+  /// The set is CLOSED at `Video | Audio`, so an unknown case reports at
+  /// `$.kind.kind.$type` — the `Binding` / `TextSource` position, not the
+  /// bare-enum one (§6) — and admitting a third surface later is an ADDITION
+  /// rather than a re-meaning of shipped bytes.
+  static func mediaKind(_ path: String, _ j: JSON) throws -> MediaKind {
+    let f = try object(path, j)
+    switch try disc(path, f) {
+    case "Video":
+      return .video(
+        autoplay: try optBool(path, f, "autoplay") ?? false,
+        poster: try optBindingSlot(path, f, "poster", .str))
+    // No slot is read here, and that is the point: `Audio` declares none, so
+    // an `"autoplay":true` riding an Audio payload has nowhere to land.
+    case "Audio":
+      return .audio
+    case let other:
+      throw unknownEnumCase("\(path).$type", other, "MediaKind: Video | Audio")
+    }
+  }
+
+  static func mediaSpec(_ path: String, _ j: JSON) throws -> MediaSpec {
+    let f = try object(path, j)
+    return MediaSpec(
+      kind: try mediaKind("\(path).kind", try req(path, f, "kind")),
+      // REQUIRED — a transport is never decorative, so there is no default to
+      // fall back to (`reject-media-missing-label`, MISSING_FIELD at
+      // `$.kind.label`).
+      label: try reqTextSource(path, f, "label"),
+      src: try reqBindingSlot(path, f, "src", .str),
+      // Omitted at TRUE — the `Toast.dismissable` polarity.
+      controls: try optBool(path, f, "controls") ?? true,
+      loop: try optBool(path, f, "loop") ?? false)
   }
 
   static func listSpec(_ path: String, _ j: JSON) throws -> ListSpec {
@@ -1124,6 +1204,7 @@ extension Decode {
     case "Icon": return .icon(try iconSpec(path, j))
     case "Link": return .link(try linkSpec(path, j))
     case "Image": return .image(try imageSpec(path, j))
+    case "Media": return .media(try mediaSpec(path, j))
     case "List": return .list(try listSpec(path, j))
     case "Toast": return .toast(try toastSpec(path, j))
     case "CodeBlock": return .codeBlock(try codeBlockSpec(path, j))

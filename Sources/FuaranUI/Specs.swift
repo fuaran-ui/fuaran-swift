@@ -112,10 +112,122 @@ public struct IconSpec: Equatable, Sendable {
   public var tone: ToneVariant
 }
 
+/// One alternate rendition of the SAME picture at a declared intrinsic pixel
+/// width (§3.6.4). Both members are required *within* the entry.
+public struct SrcSetEntry: Equatable, Sendable {
+  public var src: Binding
+  /// The `w` descriptor a client selects on. A POSITIVE integer, and the floor
+  /// is a DECODE rule rather than a render one: a `0w` candidate is not a small
+  /// image, it is one a client can never select, so admitting it would let the
+  /// wire state a rendition no host can render.
+  public var width: Int
+
+  public init(src: Binding, width: Int) {
+    self.src = src
+    self.width = width
+  }
+}
+
 public struct ImageSpec: Equatable, Sendable {
   public var alt: TextSource
   public var src: Binding
   public var variant: ImageVariant
+  /// §3.6.2 — the three presentation slots, each omitted on the wire at its
+  /// identity default. TOTAL, not `Optional`: "absent means `Natural`" is a
+  /// DEFAULT rather than a third state, so modelling absence as `nil` would
+  /// push the decision back out to every reader (the `trendPolarity`
+  /// precedent, §3.6.1).
+  public var fit: ImageFit = .natural
+  public var aspectRatio: ImageAspect = .natural
+  public var loading: ImageLoading = .eager
+  /// §3.6.3 — CONTENT, not a presentation token, so it takes the ordinary
+  /// optional posture (there is no default caption the way there is a default
+  /// fit) and is a `TextSource` rather than a `String`: a caption is
+  /// i18n-capable on exactly the terms `alt` is. Narrowing this slot to a
+  /// string is the rule a second surface is most likely to break, because it
+  /// costs nothing until somebody needs a locale.
+  public var caption: TextSource? = nil
+  /// §3.6.4 — absent MEANS the empty list, never `nil`. An absent slot and an
+  /// empty one denote the SAME document, so this is `[SrcSetEntry]` and not
+  /// `[SrcSetEntry]?`; a surface answering `nil` for an absent `srcSet` has
+  /// produced a value the format's own encoder cannot round-trip. AUTHORED
+  /// ORDER is preserved — a codec MUST NOT re-sort, because canonicalisation
+  /// sorts object keys and never array elements. (Ascending-by-width is a
+  /// RENDER-time ordering; see `orderedForPresentation` in the renderer.)
+  public var srcSet: [SrcSetEntry] = []
+  /// §3.6.5 — the only slot on this record that declares an INTERACTION.
+  /// `false` by default and omitted at that default. What it declares is that
+  /// the full asset is REACHABLE from the rendered image, not that a lightbox
+  /// appears; nothing crosses the dispatch gate (§4), which is why it is a
+  /// bool and not an `Action`.
+  public var expandable: Bool = false
+}
+
+// ── Media (§3.6.6) ───────────────────────────────────────────────────────────
+
+/// Which playback surface a `Media` node is — ONE kind, two variants, never two
+/// kinds. Everything a video surface and an audio surface SHARE is stated once
+/// on `MediaSpec`; only the slots that genuinely differ live here, and there
+/// are two of them, both on `Video`.
+///
+/// **`Audio` has NO autoplay pathway — in the type, on the wire, or in the
+/// emission.** That is why this is an `enum` with associated values per case
+/// rather than a discriminator beside two optional fields: the case declares no
+/// such slot, so a renderer has nothing to branch on and cannot acquire one by
+/// a later edit. This is stronger than a default of `false` — a slot that
+/// defaults to off is one a document can switch on, and there is no document
+/// this format wants to be able to state in which a page begins making sound
+/// unbidden. A document carrying `{"$type":"Audio","autoplay":true}` decodes to
+/// an audio surface that does not autoplay, because the value has nowhere to
+/// land.
+public enum MediaKind: Equatable, Sendable {
+  /// `autoplay` is a wire DECLARATION whose rendering is constrained: a host
+  /// that honours it MUST pair it with muted playback. There is deliberately no
+  /// separate `muted` slot on the wire — a second knob would be free to
+  /// disagree with the first, and the only combination it would add is the one
+  /// no host may render. `poster` is a second URL through the §19 floor, and a
+  /// refused one is DROPPED rather than neutered (§3.6.6).
+  case video(autoplay: Bool, poster: Binding?)
+  /// The variant whose payload is the discriminator alone.
+  case audio
+
+  /// The wire `$type` of the variant, inside `kind.kind`.
+  public var typeName: String {
+    switch self {
+    case .video: return "Video"
+    case .audio: return "Audio"
+    }
+  }
+}
+
+public struct MediaSpec: Equatable, Sendable {
+  public var kind: MediaKind
+  /// REQUIRED — the one place the media contract differs from `Image`'s. An
+  /// image can honestly be decorative and say so with an empty `alt`; a media
+  /// element is a TRANSPORT a reader focuses, plays, pauses and seeks, so it is
+  /// never decorative. A document omitting it is refused rather than defaulted,
+  /// because there is no value to default to that would not be a fabricated
+  /// name for someone else's recording.
+  public var label: TextSource
+  public var src: Binding
+  /// Omitted on the wire at TRUE — the second such slot in the vocabulary
+  /// (`Toast.dismissable` is the first). The polarity is deliberate: a media
+  /// element without a transport cannot be paused, seeked or muted by a
+  /// keyboard user at all, so the accessible setting is what a document gets
+  /// for free and taking it away is the deviation that costs a key.
+  public var controls: Bool = true
+  /// The ordinary polarity — omitted at `false`.
+  public var loop: Bool = false
+
+  public init(
+    kind: MediaKind, label: TextSource, src: Binding, controls: Bool = true, loop: Bool = false
+  ) {
+    self.kind = kind
+    self.label = label
+    self.src = src
+    self.controls = controls
+    self.loop = loop
+  }
 }
 
 public struct ListSpec: Equatable, Sendable {

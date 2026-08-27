@@ -45,12 +45,20 @@ if ($IsWindows) {
     if (-not (Get-Command link.exe -ErrorAction SilentlyContinue)) {
         $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
         if (Test-Path $vswhere) {
-            $vsRoot = & $vswhere -latest -products * -property installationPath
-            $vcvars = Join-Path $vsRoot "VC\Auxiliary\Build\vcvars64.bat"
-            if (Test-Path $vcvars) {
-                Write-Step "importing MSVC build environment (vcvars64)"
-                cmd /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
-                    if ($_ -match '^([^=]+)=(.*)$') { Set-Item -Path "Env:\$($matches[1])" -Value $matches[2] }
+            # -prerelease: without it vswhere skips Insiders/Preview installs entirely, returning
+            # empty on a machine whose only VS is prerelease — and a null $vsRoot must fall through
+            # to the clean skip below, never into Join-Path.
+            $vsRoot = & $vswhere -latest -prerelease -products * -property installationPath | Select-Object -First 1
+            if ($vsRoot) {
+                # Match the vcvars script to the HOST architecture: vcvars64 on an ARM64 host
+                # imports the x64 cross environment, not the native ARM64 one.
+                $vcvarsName = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'vcvarsarm64.bat' } else { 'vcvars64.bat' }
+                $vcvars = Join-Path $vsRoot "VC\Auxiliary\Build\$vcvarsName"
+                if (Test-Path $vcvars) {
+                    Write-Step "importing MSVC build environment ($vcvarsName)"
+                    cmd /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
+                        if ($_ -match '^([^=]+)=(.*)$') { Set-Item -Path "Env:\$($matches[1])" -Value $matches[2] }
+                    }
                 }
             }
         }

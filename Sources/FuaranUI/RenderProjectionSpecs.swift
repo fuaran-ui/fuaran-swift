@@ -1342,8 +1342,49 @@ extension Decode {
       role: role, voice: voice)
   }
 
+  /// The `Accessibility` trait's near-miss set (WIRE_FORMAT 3.1 "Near-miss slot names
+  /// are refused, not ignored") — the 3.2 grid narrowing at the position where its cost
+  /// is highest.
+  ///
+  /// This trait has NO VISIBLE OUTPUT. A mislabelled column is on screen; an ignored
+  /// `ariaLabel` looks identical to an honoured one from every side, so the refusal is
+  /// the only feedback that can ever arrive.
+  ///
+  /// Refused rather than ALIASED, and note the argument differs from the grid's. There
+  /// the names were not synonyms; here `ariaLabel` IS one, so admission turns on the
+  /// other half of the lenient profile's rule - a shorthand earns its place by being a
+  /// genuine assist to the emitting model, and a six-character key rename is not one.
+  /// `live` settles it: the HTML idiom it comes from also spells a BOOLEAN, so an alias
+  /// would bind a possibly-boolean prior onto a closed three-token set.
+  ///
+  /// Three families, grouped by the slot each points at: the ARIA attribute name, its
+  /// camelCase spelling, and the un-prefixed or un-cased slot name. Declaration order is
+  /// identical in every host, so which defect surfaces first is deterministic.
+  static let accessibilityNearMisses: [(String, String)] = [
+    ("aria-label", "label"),
+    ("ariaLabel", "label"),
+    ("aria-labelledby", "labelledBy"),
+    ("ariaLabelledBy", "labelledBy"),
+    ("labelledby", "labelledBy"),
+    ("aria-describedby", "describedBy"),
+    ("ariaDescribedBy", "describedBy"),
+    ("describedby", "describedBy"),
+    ("aria-role", "role"),
+    ("ariaRole", "role"),
+    ("aria-live", "liveRegion"),
+    ("ariaLive", "liveRegion"),
+    ("live", "liveRegion"),
+    ("liveregion", "liveRegion"),
+    ("aria-hidden", "hidden"),
+    ("ariaHidden", "hidden"),
+  ]
+
   static func accessibility(_ path: String, _ j: JSON) throws -> Accessibility {
     let f = try object(path, j)
+    // The near-miss check runs BEFORE the slot reads, matching the FormField
+    // ordering, so a trait carrying both `ariaLabel` and a well-formed `label`
+    // still names the ignored key rather than decoding half the intent silently.
+    try refuseNearMiss(path, f, accessibilityNearMisses)
     let liveRegion: LiveRegionKind? =
       try f["liveRegion"].map { try bareEnum("\(path).liveRegion", $0, "LiveRegionKind") }
     return Accessibility(

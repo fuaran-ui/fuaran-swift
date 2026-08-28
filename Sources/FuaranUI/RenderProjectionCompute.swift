@@ -122,10 +122,20 @@ extension Decode {
     }
     names.sort()
     if names.isEmpty {
-      throw wrongType(
-        path,
-        "a row-major source with at least one column - an empty feed declares no schema to infer"
-      )
+      // WIRE_FORMAT.md 16 / 24.4 - an EMPTY feed is the EMPTY TABLE, not a
+      // malformed one. An initially-empty live collection ("count the requests
+      // in an empty log") is a complete intent with zero rows and no columns to
+      // infer, and under 24.4 `"defaultValue": []` is also how a reader spells
+      // "I read this key and carry no data of my own" while a SIBLING reader's
+      // declaration seeds the slot. Refusing it accused a document the
+      // reference hosts decode, and it is what kept
+      // `nodes/shared-source-seeded-pair` red on this surface.
+      //
+      // A RAGGED feed is a different question and still refuses: rows that are
+      // not objects fail above, before any column set is taken. What this arm
+      // admits is the case with no rows at all, whose schema is not
+      // unknowable - it is empty.
+      return .embedded(schema: [], columns: [])
     }
     var columnsObj: [String: JSON] = [:]
     for name in names {

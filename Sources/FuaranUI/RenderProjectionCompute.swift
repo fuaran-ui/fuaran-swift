@@ -23,9 +23,15 @@ extension Decode {
   ///
   ///  * a binding ENVELOPE (`State` / `Static` / `Bound`) wrapped round the table -
   ///    unwrapped to its payload before the columnar decode (initial-snapshot semantics);
-  ///  * an envelope carrying NO payload member - REFUSED, because there is nothing to
-  ///    unwrap to, so the transform has no data and the grid would render empty with no
-  ///    indication that a source was ever declared;
+  ///  * a `State` envelope carrying NO payload member - the bare
+  ///    `{"$type":"State","key":k}` - ACCEPTED as a live source over the EMPTY table
+  ///    (WIRE_FORMAT.md 16). It was refused here, which was correct while nothing else
+  ///    could fill the slot; under 24.4 a SIBLING reader's declaration fills it, so the
+  ///    refusal was rejecting the most direct spelling of "I read this key and carry no
+  ///    data of my own" - the one FUARAN106's remedy text tells an author to write. A
+  ///    `Static` or `Bound` envelope carrying no payload is a different thing and is
+  ///    still refused: neither names a live slot, so there is nothing for a sibling to
+  ///    seed and the transform genuinely has no data;
   ///  * a ROW-MAJOR array of records - the shape every JSON API returns - pivoted to the
   ///    columnar form the algebra evaluates over.
   static func dataSource(_ path: String, _ j: JSON) throws -> DataSource {
@@ -84,11 +90,17 @@ extension Decode {
   /// all-present mask is synthesised); a wrapped object carrying `values` but
   /// no `validity` is the same all-present statement.
   /// Unwrap a binding envelope round a Transform source, or refuse an empty one.
+  ///
+  /// The bare `State` wrapper is the ONE empty envelope that unwraps rather than
+  /// refusing, and it unwraps to the empty row-major feed - the identical answer the
+  /// `"defaultValue": []` spelling already gave, which is what makes the two spellings
+  /// one dialect rather than two behaviours.
   static func unwrapSourceEnvelope(_ path: String, _ j: JSON) throws -> JSON {
     guard case .object(let f) = j, case .string(let tag)? = f["$type"] else { return j }
     switch tag {
     case "State":
       if let v = f["defaultValue"] ?? f["value"] { return v }
+      return .array([])
     case "Static":
       if let v = f["value"] { return v }
     case "Bound":

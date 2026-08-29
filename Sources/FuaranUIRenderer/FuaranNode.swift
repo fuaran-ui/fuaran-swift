@@ -122,7 +122,11 @@
           title: "Map", subtitle: "lat \(k.centreLatitude), lng \(k.centreLongitude) · z\(k.zoom)"))
     // Structural
     case .custom(let k):
-      return AnyView(InfoCard(title: "Custom", subtitle: "\(k.moduleId)/\(k.componentId)"))
+      // WIRE_FORMAT.md §25.4 — what an unregistered component shows a reader is
+      // a normative decision, so it lives in the pure projection (asserted on
+      // every platform) and this arm is only its application.
+      let placeholder = customPlaceholder(k)
+      return AnyView(InfoCard(title: placeholder.title, subtitle: placeholder.identity))
     case .errorBoundary(let k): return AnyView(FuaranNode(k.child, ctx))
     case .switchKind(let k): return AnyView(RenderSwitch(k: k, ctx: ctx))
     case .fragmentDecl(let k): return AnyView(FuaranNode(k.body, ctx))

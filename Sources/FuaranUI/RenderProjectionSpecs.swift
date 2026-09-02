@@ -927,8 +927,29 @@ extension Decode {
       if let v = colsJ { cols = try int("\(path).cols", v) } else { cols = 1 }
       return .grid(
         cols: cols, gap: try optInt(path, f, "gap"), templateColumns: templateColumns)
+    case "Masonry":
+      // WIRE_FORMAT §3.6.7 — column-fill. `cols` is REQUIRED and POSITIVE, on
+      // the §3.6.4 srcSet width-floor pattern: `column-count: 0` is invalid
+      // CSS, so a container declaring it would fall back to whatever the host
+      // stylesheet last said and the wire would be carrying a host-defined
+      // layout.
+      //
+      // No auto-column leniency here, unlike `Grid` above, and the asymmetry is
+      // deliberate rather than an omission: `Grid` canonicalises a column-less
+      // spec to `Auto` because the language already owns that concept, whereas
+      // `Auto` is a ROW-fill mode — rewriting a masonry into it would discard
+      // the author's intent rather than recover it.
+      guard let colsJ = getAliased(f, "cols", ["columns"]) else {
+        throw Decode.missing(path, "cols")
+      }
+      let masonryCols = try int("\(path).cols", colsJ)
+      guard masonryCols > 0 else {
+        throw Decode.wrongType(
+          "\(path).cols", "JSON number (positive integer column count)")
+      }
+      return .masonry(cols: masonryCols, gap: try optInt(path, f, "gap"))
     case "Auto": return .auto
-    case let o: throw unknownCase(path, o, "Flex | Grid | Auto")
+    case let o: throw unknownCase(path, o, "Flex | Grid | Masonry | Auto")
     }
   }
 

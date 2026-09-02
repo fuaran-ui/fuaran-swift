@@ -209,12 +209,43 @@
             }
           }
         }
+      case .masonry(let cols, let gap):
+        // WIRE_FORMAT §3.6.7 — `Grid` fills by ROW, `Masonry` by COLUMN, and
+        // that difference is the whole content of the case. The HTML hosts
+        // realise it with the CSS multi-column family; SwiftUI has no
+        // multi-column primitive, so the faithful projection is the SEMANTIC
+        // one: an HStack of VStacks whose children run DOWN each column in
+        // document order, balanced the way `column-count` balances them.
+        let g = CGFloat(gap ?? 4)
+        let columns = columnFilled(children, max(cols, 1))
+        HStack(alignment: .top, spacing: g) {
+          ForEach(columns.indices, id: \.self) { c in
+            VStack(alignment: .leading, spacing: g) {
+              ForEach(columns[c].indices, id: \.self) { i in FuaranNode(columns[c][i], ctx) }
+            }
+          }
+        }
       case .auto:
         VStack(alignment: .leading) {
           ForEach(children.indices, id: \.self) { i in FuaranNode(children[i], ctx) }
         }
       }
     }
+  }
+
+  /// Distribute `items` into `count` COLUMNS filled top-to-bottom, the
+  /// reading order §3.6.7 pins for `Masonry`. Contrast `chunked`, which cuts
+  /// the same list into ROWS for `Grid`.
+  private func columnFilled<T>(_ items: [T], _ count: Int) -> [[T]] {
+    guard count > 0, !items.isEmpty else { return [items] }
+    let per = (items.count + count - 1) / count
+    var out: [[T]] = []
+    var i = 0
+    while i < items.count {
+      out.append(Array(items[i..<min(i + per, items.count)]))
+      i += per
+    }
+    return out
   }
 
   private func chunked<T>(_ items: [T], _ size: Int) -> [[T]] {

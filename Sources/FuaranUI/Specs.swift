@@ -550,6 +550,11 @@ public struct MapSpec: Equatable, Sendable {
 public enum BoxLayout: Equatable, Sendable {
   case flex(direction: Orientation, gap: Int?, wrap: Bool)
   case grid(cols: Int, gap: Int?, templateColumns: String?)
+  /// WIRE_FORMAT §3.6.7 (Phase 1082) — the column-fill mode. `cols` is
+  /// REQUIRED and POSITIVE; there is deliberately no `templateColumns` twin,
+  /// because the multi-column model realising masonry has no track list for
+  /// one to name.
+  case masonry(cols: Int, gap: Int?)
   case auto
 }
 

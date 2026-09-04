@@ -61,7 +61,7 @@ jobs:
 
       # The corpus became its OWN public repo on 2026-07-27
       # (fuaran-ui/fuaran-ui-specification). It had been a tracked folder inside
-      # fuaran-ui/workspace, and this step still sparse-checked-out that path —
+      # the maintainers' workspace repository, and this step still sparse-checked-out that path —
       # which since the split matches nothing, so the corpus never arrived and
       # the placement `mv` failed with "No such file or directory". Every run
       # since died there, BEFORE `swift build`, and it went unnoticed because the

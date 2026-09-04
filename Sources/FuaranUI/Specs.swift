@@ -200,6 +200,42 @@ public enum MediaKind: Equatable, Sendable {
   }
 }
 
+/// One timed-text track on a media element (§3.6.6, Phase 1110).
+///
+/// **The strictest record on the wire: four of its five members are REQUIRED.**
+/// `default` is the one omitted-at-`false` slot; everything else must be stated,
+/// and each requirement buys something a default could not.
+///
+/// `srcLang` is required on EVERY kind, where HTML makes `srclang` mandatory
+/// only on a subtitles track. The extra strictness costs an author one value and
+/// buys a menu a user agent can order, a speech engine can pronounce and a
+/// reader can tell apart; there is no value to default to that would not be an
+/// invented claim about someone else's recording. `label` is required for the
+/// reason `MediaSpec.label` is: it is the entry a user agent puts in its track
+/// menu and the only thing distinguishing one track from another there.
+public struct TrackEntry: Equatable, Sendable {
+  public var kind: TrackKind
+  public var src: Binding
+  public var srcLang: String
+  public var label: TextSource
+  /// The ONE omitted-at-`false` slot. Note what it does NOT decide: §3.6.6
+  /// obligation 3 says a document electing two defaults of one kind is legal
+  /// bytes, so this slot records the ELECTION and the render projection
+  /// resolves it (first election of a kind wins). A decoder that refused the
+  /// second election would refuse a document every lenient host renders.
+  public var isDefault: Bool
+
+  public init(
+    kind: TrackKind, src: Binding, srcLang: String, label: TextSource, isDefault: Bool = false
+  ) {
+    self.kind = kind
+    self.src = src
+    self.srcLang = srcLang
+    self.label = label
+    self.isDefault = isDefault
+  }
+}
+
 public struct MediaSpec: Equatable, Sendable {
   public var kind: MediaKind
   /// REQUIRED — the one place the media contract differs from `Image`'s. An
@@ -218,15 +254,153 @@ public struct MediaSpec: Equatable, Sendable {
   public var controls: Bool = true
   /// The ordinary polarity — omitted at `false`.
   public var loop: Bool = false
+  /// §3.6.6 (Phase 1110) — the element's timed-text tracks, on the SPEC rather
+  /// than on `MediaKind.video`, because captions and a transcript are not
+  /// video-only affordances.
+  ///
+  /// Absent MEANS the empty list, never `nil` — an absent slot and an empty one
+  /// denote the same document, so this is `[TrackEntry]` and not
+  /// `[TrackEntry]?`, exactly as `ImageSpec.srcSet` is. AUTHORED ORDER is
+  /// preserved and never re-sorted: this is the OPPOSITE of `srcSet`'s rule, and
+  /// the difference is not an inconsistency — a browser picks ONE candidate from
+  /// a srcset by an algorithm, so ordering it is canonicalisation, while a
+  /// reader picks a track from a menu the user agent builds in DOCUMENT order,
+  /// so ordering it would be rewriting someone else's menu.
+  public var tracks: [TrackEntry] = []
+  /// §3.6.6 (Phase 1110) — the element's text alternative.
+  ///
+  /// An ORDINARY optional, and the contrast with `tracks` is deliberate: absent
+  /// means the document offers no transcript, which is a different statement
+  /// from offering an empty one. It lives on the spec rather than on the video
+  /// variant because a transcript is the affordance an AUDIO surface needs most
+  /// — a recording with no visual channel has nowhere else to put its words.
+  public var transcript: TextSource? = nil
 
   public init(
-    kind: MediaKind, label: TextSource, src: Binding, controls: Bool = true, loop: Bool = false
+    kind: MediaKind, label: TextSource, src: Binding, controls: Bool = true, loop: Bool = false,
+    tracks: [TrackEntry] = [], transcript: TextSource? = nil
   ) {
     self.kind = kind
     self.label = label
     self.src = src
     self.controls = controls
     self.loop = loop
+    self.tracks = tracks
+    self.transcript = transcript
+  }
+}
+
+// ── Embed (§3.6.8) ───────────────────────────────────────────────────
+
+/// The sandboxed third-party embed (§3.6.8, Phase 1111).
+///
+/// **A KIND, not a `Mount` variant and not a `Media` variant.** `Mount` composes
+/// a COOPERATING guest — a scope id, a declared message channel, a capability
+/// request list — and a third-party page has none of those and cannot acquire
+/// them. `Media` fetches an asset and DISPLAYS it, decoded into no scripting
+/// context, where an embed fetches a document and lets it EXECUTE. That last
+/// difference is why the source takes its own, narrower egress class (§19.1)
+/// rather than reusing `Media`'s.
+public struct EmbedSpec: Equatable, Sendable {
+  public var src: Binding
+  /// REQUIRED, on `MediaSpec.label`'s argument one kind over. A frame is a focus
+  /// container a reader tabs INTO, so there is no decorative embed the way there
+  /// is a decorative image; a frame with no accessible name is announced as
+  /// "frame" and nothing else. A document omitting it is refused rather than
+  /// defaulted, because an invented title is a claim about somebody else's
+  /// document.
+  public var title: TextSource
+  /// Omitted at the EMPTY list, and empty means TOTAL DENIAL. That polarity is
+  /// the design rather than a consequence of the omit rule: the wire-cheapest
+  /// document is also the most locked-down one, so the default a careless
+  /// emitter produces is the safe one.
+  ///
+  /// AUTHORED order is preserved here (a JSON array is ordered data); the
+  /// vocabulary's declaration order is imposed at RENDER time, which is where
+  /// the determinism the markup needs actually belongs.
+  public var permissions: [EmbedPermission] = []
+  /// REUSES `ImageAspect` rather than minting a parallel enum with identical
+  /// cases: the cases are pure layout ratios with nothing image-specific in
+  /// them, and the wire carries bare strings, so the type name reaches no
+  /// document. Two closed sets that must be kept in step is the defect a
+  /// separate type would introduce, not avoid. Total, omitted at `Natural`.
+  public var aspectRatio: ImageAspect = .natural
+
+  public init(
+    src: Binding, title: TextSource, permissions: [EmbedPermission] = [],
+    aspectRatio: ImageAspect = .natural
+  ) {
+    self.src = src
+    self.title = title
+    self.permissions = permissions
+    self.aspectRatio = aspectRatio
+  }
+}
+
+// ── Tree (§3.6.12) ─────────────────────────────────────────────────
+
+/// One row of a `Tree` (§3.6.12, Phase 1120) — the format's first
+/// SELF-REFERENTIAL record.
+///
+/// Rows are `TreeItem`s, not `Node`s, and `children` is a list of the same
+/// record. `id` and `label` are required; `children` omits at the EMPTY list and
+/// `icon` when absent, so a leaf carries two keys and nothing else — which is
+/// most of a real hierarchy.
+///
+/// `id` is required because it is what the two State slots NAME. `label` is a
+/// `TextSource` because it is content — authored, translated, bindable.
+///
+/// **Row ids MUST be unique within one tree, and that is an EMIT-side
+/// obligation, not a decode refusal** (§8.1's position for `NodeId`, transferred
+/// for §8.1's own reason): duplicate detection is a whole-tree property, a
+/// decoder streaming a document is not required to carry the id set, and there
+/// is no error code for it. This surface therefore accepts a duplicate and is
+/// still conformant.
+public struct TreeItem: Equatable, Sendable {
+  public var id: String
+  public var label: TextSource
+  public var icon: String?
+  public var children: [TreeItem]
+
+  public init(id: String, label: TextSource, icon: String? = nil, children: [TreeItem] = []) {
+    self.id = id
+    self.label = label
+    self.icon = icon
+    self.children = children
+  }
+}
+
+/// Recursive disclosure with tree semantics (§3.6.12, Phase 1120).
+///
+/// **This kind carries no `expandable` and no `selectable` boolean, and none is
+/// coming.** A behaviour the reader drives is declared as a named State key the
+/// host both writes and reads; a flag with no key behind it is a decorative
+/// control writing state nothing reads. The slot shapes are fixed by the
+/// specification so a host reading them does not have to guess:
+///
+/// - `expandedStateKey` names a JSON **array of row ids** — the rows currently
+///   open. Absent, the tree renders FULLY EXPANDED and does not toggle.
+/// - `selectionStateKey` names a bare **row-id string**. Absent, the tree does
+///   not select and carries no selected state at all.
+///
+/// A state value of any other shape reads as *empty* / *none* rather than as an
+/// error: this is a host's own state slot and not a wire document, so there is
+/// nothing here to refuse, and refusing would blank a tree over a value the
+/// reader never authored.
+public struct TreeSpec: Equatable, Sendable {
+  public var items: [TreeItem]
+  public var expandedStateKey: String?
+  public var selectionStateKey: String?
+  public var onSelect: Closure?
+
+  public init(
+    items: [TreeItem], expandedStateKey: String? = nil, selectionStateKey: String? = nil,
+    onSelect: Closure? = nil
+  ) {
+    self.items = items
+    self.expandedStateKey = expandedStateKey
+    self.selectionStateKey = selectionStateKey
+    self.onSelect = onSelect
   }
 }
 
@@ -260,6 +434,11 @@ public struct MathSpec: Equatable, Sendable {
 public struct DrawPoint: Equatable, Sendable {
   public var x: Double
   public var y: Double
+
+  public init(x: Double, y: Double) {
+    self.x = x
+    self.y = y
+  }
 }
 
 public struct ViewBox: Equatable, Sendable {
@@ -267,6 +446,13 @@ public struct ViewBox: Equatable, Sendable {
   public var minY: Double
   public var width: Double
   public var height: Double
+
+  public init(minX: Double, minY: Double, width: Double, height: Double) {
+    self.minX = minX
+    self.minY = minY
+    self.width = width
+    self.height = height
+  }
 }
 
 public struct DrawStyle: Equatable, Sendable {
@@ -348,6 +534,24 @@ public struct DrawingSpec: Equatable, Sendable {
   public var style: DrawStyle
   public var title: TextSource?
   public var description: TextSource?
+
+  /// Public because a `Drawing` is now something a render projection PRODUCES as
+  /// well as decodes: the Phase 1099 sparkline lowering builds one from a
+  /// resolved series so the picture goes through the drawing canvas the surface
+  /// already has, rather than through a second hand-written vector path.
+  ///
+  /// This is not an encode leg. The value never becomes wire bytes here — it is
+  /// handed straight to the renderer — so the decode-only posture is unchanged.
+  public init(
+    viewBox: ViewBox, shapes: [Shape], style: DrawStyle = .empty, title: TextSource? = nil,
+    description: TextSource? = nil
+  ) {
+    self.viewBox = viewBox
+    self.shapes = shapes
+    self.style = style
+    self.title = title
+    self.description = description
+  }
 }
 
 // ── Input specs ──────────────────────────────────────────────────────────────
@@ -359,6 +563,25 @@ public enum FormFieldKind: Equatable, Sendable {
   /// The switch affordance: the same boolean slot as `checkbox`, a different control.
   case toggle(value: Binding, onToggle: Closure?)
   case choice(options: Binding, value: Binding, onChange: Closure?)
+  /// The searchable form of `choice` (§3.6.9, Phase 1113). **`options` is the
+  /// case's only REQUIRED member** — a combobox with no option source is not a
+  /// control — and `value` / `onChange` are `choice`'s, deliberately and
+  /// normatively: the constrained combobox IS a searchable select, so a document
+  /// migrating between the two changes its `$type` and nothing else, and a host
+  /// implementing a different value contract here would break exactly that
+  /// migration.
+  ///
+  /// `allowFreeText` omits at `false` and the polarity is load-bearing: the
+  /// SHORTEST combobox document is the CONSTRAINED one, so admitting off-list
+  /// values is the thing an emitter has to ask for. A present member of any
+  /// other type is `WRONG_TYPE` and MUST NOT be coerced — a lenient truthiness
+  /// read would widen the field on `"no"` and `"false"` alike.
+  ///
+  /// An asynchronous suggestion source needs no vocabulary of its own: a
+  /// `Binding.query` in the ordinary `options` slot IS the async feed, resolved
+  /// by the same machinery every other query-bound slot uses. Nothing in this
+  /// case names a request, a debounce or a minimum query length.
+  case combobox(options: Binding, value: Binding, allowFreeText: Bool, onChange: Closure?)
   /// 0.2.0 — the dual-thumb numeric range (absorbed the retired RangeFilter).
   case range(value: Binding, min: Double?, max: Double?, step: Double?, onChange: Closure?)
   case rangedNumber(

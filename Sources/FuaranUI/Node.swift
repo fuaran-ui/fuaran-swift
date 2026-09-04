@@ -91,6 +91,8 @@ public indirect enum NodeKind: Equatable, Sendable {
   case link(LinkSpec)
   case image(ImageSpec)
   case media(MediaSpec)
+  case embed(EmbedSpec)
+  case tree(TreeSpec)
   case list(ListSpec)
   case toast(ToastSpec)
   case codeBlock(CodeBlockSpec)
@@ -139,6 +141,8 @@ public indirect enum NodeKind: Equatable, Sendable {
     case .link: return "Link"
     case .image: return "Image"
     case .media: return "Media"
+    case .embed: return "Embed"
+    case .tree: return "Tree"
     case .list: return "List"
     case .toast: return "Toast"
     case .codeBlock: return "CodeBlock"
@@ -167,8 +171,8 @@ public indirect enum NodeKind: Equatable, Sendable {
     case .box, .splitPanel, .tabs, .stepper, .summaryList, .disclosure, .modal, .scrollArea:
       return .layout
     case .heading, .markdown, .metric, .badge, .sparkline, .callout, .progress, .skeleton,
-      .icon, .fact, .labelValueRow, .link, .image, .media, .list, .toast, .codeBlock, .math,
-      .drawing:
+      .icon, .fact, .labelValueRow, .link, .image, .media, .embed, .tree, .list, .toast,
+      .codeBlock, .math, .drawing:
       return .display
     case .form, .filters, .button, .fileUpload, .select:
       return .input
@@ -188,15 +192,35 @@ public struct Node: Equatable, Sendable {
   public var state: StateBehaviour
   public var style: SemanticStyle
   public var accessibility: Accessibility?
+  /// The tooltip trait (§3.1, Phase 1112) — a short supplementary hint.
+  ///
+  /// **A node-level TRAIT, not a field of any kind**, and it sits here beside
+  /// `accessibility` for the reason the specification gives: nothing about "a
+  /// short supplementary description of this thing" varies with whether the
+  /// thing is a button or a metric, so a per-kind spelling of it is not this
+  /// trait. In particular `ButtonSpec` carries a legacy host-only `tooltip`
+  /// slot which is never emitted and never decoded — a `tooltip` inside a
+  /// `kind` object is an unknown key, tolerated and ignored under rule 2, and
+  /// is not a second spelling of this one.
+  ///
+  /// **It is a DESCRIPTION, never a NAME.** `accessibility.label` names the
+  /// element; the tooltip supplements a name that already exists. An icon-only
+  /// control needs both slots saying different things, so a surface that
+  /// projected this as the accessible name would leave such a control with two
+  /// competing names and no description. See `tooltipProjection` in the
+  /// renderer for how that lands on this platform.
+  public var tooltip: TextSource?
 
   public init(
     id: String, kind: NodeKind, state: StateBehaviour = .empty,
-    style: SemanticStyle = .default, accessibility: Accessibility? = nil
+    style: SemanticStyle = .default, accessibility: Accessibility? = nil,
+    tooltip: TextSource? = nil
   ) {
     self.id = id
     self.kind = kind
     self.state = state
     self.style = style
     self.accessibility = accessibility
+    self.tooltip = tooltip
   }
 }

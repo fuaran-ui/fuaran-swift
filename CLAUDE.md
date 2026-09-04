@@ -39,8 +39,11 @@ fuaran-swift/
 │   ├── Node.swift                # Node envelope + closed NodeKind (+ exhaustive typeName/category)
 │   └── RenderProjection*.swift   # the render-projection decoder (canonical tree JSON → sealed model)
 ├── Sources/FuaranUIRenderer/
-│   ├── MediaPlayback.swift       # the media playback projection (the three §3.6.6 obligations)
+│   ├── MediaPlayback.swift       # the media playback projection (the six §3.6.6 obligations)
 │   ├── ImagePresentation.swift   # the image presentation projection (§3.6.2–§3.6.5)
+│   ├── EmbedPresentation.swift   # the embed frame projection (§3.6.8 + the §19.1 egress class)
+│   ├── TreeProjection.swift      # the tree row projection (the eight §3.6.12 obligations)
+│   ├── TooltipProjection.swift   # the tooltip trait projection (§3.1)
 │   └── …                         # Accessibility / TrendSentiment / FuaranNode / Theme / Drawing*
 ├── Tests/FuaranUITests/
 │   ├── CorpusTests.swift         # corpus render-coverage harness (per-kind coverage report)
@@ -116,12 +119,23 @@ placeholder, and filtering during decode would also stop the projection being a 
 the wire. The consumer obligations are stated in the README's "Safety floor" section; keep them
 there (they are what a consumer reads) rather than only here.
 
-**Four positions, not one.** `Link.href`, `Image.src`, `Media.src`, the `Video` variant's `poster`
-and every `Image.srcSet` candidate all reach the floor, and the last three are the ones worth
-naming: they are fetched with **no user act at all**, so a slot of that shape that skipped the floor
-would be a documented way around it. Accessors exist for each (`sanitizedSrc` on `MediaSpec` and
-`SrcSetEntry`, `sanitizedPoster` on `MediaSpec`), and what a refusal *costs* differs per position —
-see "Image presentation" and "Media playback" above.
+**Six positions, not one.** `Link.href`, `Image.src`, `Media.src`, the `Video` variant's `poster`,
+every `Image.srcSet` candidate and every `Media.tracks` entry's `src` all reach the floor, and all
+but the first are worth naming: they are fetched with **no user act at all**, so a slot of that
+shape that skipped the floor would be a documented way around it. Accessors exist for each
+(`sanitizedSrc` on `MediaSpec`, `SrcSetEntry` and `TrackEntry`, `sanitizedPoster` on `MediaSpec`),
+and what a refusal *costs* differs per position — see "Image presentation" and "Media playback"
+above.
+
+**`Embed.src` is a SEVENTH position and does NOT ride that floor.** §19.1 gives it its own, narrower
+class, because everything else here is fetch-and-display or navigate-on-a-click and an embed is
+fetch-and-**execute**. `FuaranUrlPolicy.sanitizeEmbed` accepts `https` and nothing else — refusing
+`http` (a document any intermediary can rewrite becomes that intermediary's script in a frame this
+page created) and refusing a **schemeless** reference (a same-origin frame is exactly where a
+document granted both `AllowSameOrigin` and `AllowScripts` can reach its own frame element and remove
+the sandbox from it). `EmbedSpec.sanitizedSrc` is the accessor; naming the class matters beyond the
+scheme set, because a composition that declared an origin for image egress has said nothing about
+which DOCUMENTS it is willing to run.
 
 A renderer arm that ever *does* resolve a URL onward — a real image loader, a tappable link — must
 route it through `FuaranUrlPolicy.sanitize` in the same change that adds it. This is the same
@@ -178,7 +192,8 @@ a `.constant` binding and be listed in the write-back audit comment on `RenderFo
 
 **Why this needs a written rule.** The renderer dispatches over a sealed tree, so the compiler
 forces a new arm to EXIST but cannot force it to WRITE. Today `.text` / `.number` / `.checkbox`
-are wired and the rest are inert by construction — which is a render floor, not a defect, because
+are wired and the rest are inert by construction — `.combobox` included, which landed on `.choice`'s
+own control because the two ARE the same value contract. That is a render floor, not a defect, because
 a disabled control drops no input. The failure mode to avoid is a *live* control that quietly
 fails to commit; the sibling Kotlin host shipped exactly that in five arms (Phase 667).
 
@@ -255,9 +270,43 @@ round-tripping the bytes perfectly. The projection is
   caller hand `autoplay: true` to an audio plan, re-opening by an initialiser what the sealed enum
   closes by its cases.
 
-**Forward-coupling.** A third `MediaKind` variant, a change to the pairing rule, or a new
-`MediaSpec` slot updates this section, `MediaPlayback.swift`, the render arm in `FuaranNode.swift`,
-and `Tests/FuaranUIRendererTests/MediaPlaybackTests.swift` in the same change. The projection sits
+### Text tracks and the transcript — three more, all about the element's CHILDREN
+
+Phase 1110 added `tracks` and `transcript` to the same spec, and three obligations with them. All
+three are ones a surface gets wrong while round-tripping the bytes perfectly, and all three are
+discharged in `mediaPlaybackPlan` / `mediaTrackPlans`.
+
+- **Authored order is PRESERVED, and it is the OPPOSITE of `srcSet`'s rule.** The two are not an
+  inconsistency: a browser picks ONE candidate from a srcset by an algorithm, so ordering it is
+  canonicalisation, while a reader picks a track from a menu the user agent builds in DOCUMENT
+  order, so ordering it would be rewriting someone else's menu. They live in two files precisely so
+  neither can be "fixed" into the other, and the checker asserts the neighbour still sorts — a
+  change that unified them would otherwise satisfy both obligations while breaking one.
+- **At most one `default` per KIND, first election wins — resolved at RENDER, not at decode.** A
+  document electing two default captions tracks is legal bytes: the decoder does not refuse it,
+  because a lenient host would render it anyway and HTML leaves the case undefined. So the wire keeps
+  both elections and `MediaTrackPlan.isDefault` carries the resolved one. The later track is still
+  emitted; only its claim on the menu is dropped. The election is per kind, so a captions default and
+  a subtitles default coexist.
+- **A refused track source DROPS the track**, taking the POSTER's disposition rather than the primary
+  source's: an element must have a source, but it need not have this track. Flooring runs BEFORE the
+  election, so a refused track never occupies a kind's default slot on its way out — the `srcSet`
+  rule, at the one place where the consequence is visible.
+
+**The transcript is a PEER field of the plan, never a member of `tracks`, and that is this surface's
+whole statement of the beside-not-inside obligation.** `<video>` and `<audio>` admit only source-ish
+children, so a transcript placed there would be fallback content a browser never shows — which is why
+the reference emission gains a wrapper for it. On a surface with no document, "beside" is exactly two
+sibling fields of one plan, so an arm that renders `tracks` as children cannot render the transcript
+among them. It carries the MEDIA's resolved label as its own accessible name, because the wire gives
+it no label of its own and a reader meeting the disclosure out of context must be told which
+recording it transcribes. A transcript resolving to whitespace is NO transcript: advertising a
+disclosure that opens onto nothing is the tooltip's obligation-5 shape one kind over.
+
+**Forward-coupling.** A third `MediaKind` variant, a change to the pairing rule, a fifth `TrackKind`,
+a change to the election or ordering rules, or a new `MediaSpec` slot updates this section,
+`MediaPlayback.swift`, the render arm in `FuaranNode.swift`, and
+`Tests/FuaranUIRendererTests/MediaPlaybackTests.swift` in the same change. The projection sits
 **outside** `#if canImport(SwiftUI)` so the obligations are asserted on every platform; only the
 view application is Apple-gated.
 
@@ -356,6 +405,124 @@ table above, `semanticTrait(forRole:)`, and the drop-set assertions in
 `Tests/FuaranUIRendererTests/AccessibilityProjectionTests.swift` in the same change. The mapping is
 deliberately **outside** `#if canImport(SwiftUI)` so those assertions run on every platform — a
 decision testable on only one platform is a decision nobody re-checks.
+
+## Embed — a slot that EXECUTES, and what that changes
+
+`Embed` (§3.6.8) is a Display kind carrying a document URL, a mandatory title, an optional aspect
+ratio and a closed list of sandbox relaxations that is EMPTY by default. The projection is
+`Sources/FuaranUIRenderer/EmbedPresentation.swift`; three decisions live here.
+
+- **A KIND, not a `Mount` variant.** `Mount` composes a COOPERATING guest — a scope id, a declared
+  message channel, a capability request list — and a third-party page has none of those and cannot
+  acquire them. It is equally not a `Media` variant: `Media` fetches an asset and DISPLAYS it,
+  decoded into no scripting context, where an embed fetches a document and lets it EXECUTE. That
+  difference is why the source takes its own egress class (see the URL floor above) rather than
+  reusing `Media`'s.
+- **The sandbox declaration is emitted ALWAYS and EMPTY when nothing is granted, and the type is what
+  discharges the "always" half.** `EmbedFramePlan.sandbox` is `[String]` and not `[String]?`, so
+  there is no representation of "no sandbox" for an arm to reach — omitting the declaration on a
+  permissionless embed produces the same result as an UNSANDBOXED frame, and that is the obligation a
+  surface fails by writing the obvious code. The tokens are the VOCABULARY's declaration order,
+  de-duplicated, read from `EmbedPermission.allCases` rather than from a second list beside it, so a
+  fifth relaxation takes its place with no edit here. `AllowFullscreen` is NOT a sandbox token — it
+  is a permissions-policy directive riding `allow`, and the corpus fixture carries exactly that one
+  permission so a host that mapped the whole enum onto sandbox tokens fails there and nowhere else.
+- **A refused source OMITS the source entirely, and the refusal is still RECORDED.** This is the one
+  place a refusal does not take a substitute destination: a frame pointed at a refusal URL RENDERS
+  that page, where one with no source is a well-defined empty browsing context that fetches nothing.
+  The plan therefore carries `source: String?` **and** `sourceRefused: Bool`, because "nothing was
+  declared" and "this was refused" are different facts and an Optional alone cannot tell them apart —
+  the `ImagePresentation` `expansionRefused` shape, at the position where the difference matters
+  most. An empty resolved source reads as *nothing declared* rather than as a refusal: telling a
+  reader their destination was rejected when the document never resolved one is a wrong diagnosis.
+
+**The decoder does NOT apply the floor**, and that is §19.1 rather than an oversight: a document
+naming an `http` or relative embed source is a valid wire document, so the decoder carries the value
+through unchanged and the check happens where a real destination exists.
+
+**Forward-coupling.** A fifth `EmbedPermission`, a change to the token mapping or the ordering rule,
+or a change to what a refusal costs updates this section, `EmbedPresentation.swift`, the arm in
+`FuaranNode.swift`, and the three `Embed/*` checkers in
+`Tests/FuaranUIRendererTests/RenderObligationTests.swift` in the same change.
+
+## Tree — eight obligations, one of which has a manifest row
+
+`Tree` (§3.6.12) carries a hierarchy of `TreeItem` ROWS — not `Node`s — and, optionally, the names of
+the two State slots through which a reader opens rows and selects one. The projection is
+`Sources/FuaranUIRenderer/TreeProjection.swift`; what transfers and what does not is here.
+
+**What crosses from the HTML tiers is not the attribute names but the FACTS behind them.** Those
+tiers emit `role="tree"` / `role="treeitem"` / `role="group"` with `aria-level`, `aria-setsize`,
+`aria-posinset`, `aria-expanded`, `aria-selected` and a roving `tabindex`. A SwiftUI surface has no
+attribute bag, so `TreeRowPlan` carries a row's depth, its position in its own sibling set, whether it
+owns children, whether it is open, whether it is selected, and which single row is the widget's tab
+stop — every one computable from the wire plus the two named slots, with no view involved.
+
+- **`expanded` and `selected` are `Optional`, and `nil` is the ABSENCE of the claim rather than a
+  negative one.** On a leaf an expansion claim asserts a subtree that does not exist and assistive
+  technology announces the row as closed — a reader told there is more when there is not. A tree that
+  names no selection key must not declare a selectable widget with nothing selected.
+- **A tree naming no `expandedStateKey` renders FULLY EXPANDED**, and an EMPTY declared set is a
+  different state: a document that named a key over which every row is currently closed. Collapsing
+  the two would make a declared, fully-closed tree indistinguishable from a static one. A state value
+  of any other shape reads as empty rather than as an error — this is the host's own slot, not a wire
+  document, and refusing would blank a tree over a value the reader never authored.
+- **ONE tab stop.** Exactly one VISIBLE row carries it — the selected row when it is visible, else the
+  first visible row — computed from state alone, so a server rendering and an interactive host's first
+  frame agree. This is the obligation the kind exists for: a composition of independently focusable
+  containers is N tab stops, and no arrangement of them produces one.
+- **The accessible name is the row's OWN visible label, stated and never computed.** A treeitem owns
+  its child group, so a name computed from contents reads the whole branch out as the row's own name;
+  the arm therefore makes each row one accessibility element with a stated label. This is the one
+  obligation with a `render-fidelity.json` row, so it is asserted in `RenderObligationTests`; the
+  other seven are asserted in `TreeProjectionTests`, because "the manifest does not enumerate it" is
+  not the same statement as "no host owes it".
+- **Nothing else is derived from a row.** Expandability comes from `children` and from nothing else,
+  and there is no per-row expansion state beside the named key — a shadow copy is free to disagree
+  with the slot every other row is drawn from. `visibleRowIds` and the plans read the same
+  `isExpanded`, so a second walk cannot acquire its own notion of openness.
+- **The six key bindings are an INTERACTIVE host's addition** over this identical structure, and are
+  deliberately not modelled. The server rendering is complete and navigable; what hydration adds is
+  movement, not legibility.
+
+**Row nesting is bounded on its OWN axis (§21.5).** A whole hierarchy lives inside one node, so the
+node-depth counter cannot see it however deep it goes, and at roughly two JSON levels per row the
+syntactic bound is not reached either — the same two false comforts the `TreeOp.Batch` axis sprang, at
+a new slot. `WireWalkState.enterItem` counts it from the root row list and refuses a breach on the way
+down, reusing `maxNodeDepth` rather than minting a sixth limit: these frames cost what the node
+decoder's frames cost, so a second number would be two figures for one per-frame budget. It does NOT
+feed `maxNodes` — a `TreeItem` is not a `Node`, and counting one as the other would let a wide
+hierarchy exhaust a budget that exists to bound a different population.
+
+**Row-id uniqueness is an EMIT-side obligation, not a decode refusal**, per §8.1's position for
+`NodeId`: duplicate detection is a whole-tree property, a streaming decoder is not required to carry
+the id set, and there is no error code for it. This surface accepts a duplicate and is conformant.
+
+## The tooltip trait — a description, never a name
+
+The node-level `tooltip` (§3.1) is a hint that supplements a name which already exists. The
+projection is `Sources/FuaranUIRenderer/TooltipProjection.swift`, and the decisions — including two
+DECLINED obligations — are recorded in that file's header rather than duplicated here, because
+`render-fidelity.json` carries **no row** for it (the trait is a field, not a kind, and §11.2
+vocabulary attestation enumerates cases) and so `TooltipProjectionTests` is the whole of this
+surface's answer.
+
+Three things are worth stating here anyway.
+
+- **It reaches `accessibilityHint` and NEVER `accessibilityLabel`**, and the separation is structural:
+  the projection carries no name-shaped field at all, so there is nothing for an arm to reach for. An
+  icon-only control needs both slots saying different things, and a surface that conflated them would
+  leave such a control with two competing names and no description.
+- **A hint that resolves to empty or whitespace emits NOTHING** — no rendered element, no description.
+  This is the one obligation of the six a surface fails by writing the obvious code
+  (`if node.tooltip != nil`), and emptiness is decided AFTER resolution, because a bound or `i18n`
+  hint resolves only at render time.
+- **Two obligations are declined and say so in the projection's own fields.** The focus-stop guarantee
+  is not claimed: the render floor gives most kinds no focus stop, and synthesising one around every
+  hinted node would rewrite a tree's tab order to satisfy a description. And the `describedBy` merge is
+  VACUOUS here, because that slot is an id reference into a document this surface does not have — the
+  accessibility projection drops it and reports it dropped, so there is nothing to merge with. Both are
+  fields rather than omissions, so a reader can tell a decision from an oversight.
 
 ## Cross-repo dependencies
 

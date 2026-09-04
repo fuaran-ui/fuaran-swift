@@ -330,3 +330,76 @@ public enum TrendPolarity: String, CaseIterable, Equatable, Sendable {
   case higherIsBetter = "HigherIsBetter"
   case lowerIsBetter = "LowerIsBetter"
 }
+
+/// `TrackEntry.kind` — a media element's timed-text track class
+/// (WIRE_FORMAT.md §3.6.6, Phase 1110). Bare strings on the wire.
+///
+/// **The set is CLOSED at four, and `Metadata` is deliberately not a case.** Its
+/// cues are rendered by no user agent and read only by script, so a declarative
+/// document naming it would state an intent no conformant host could honour
+/// without leaving the vocabulary. A fifth is an ADDITION, never a spelling a
+/// decoder may guess at — which is why no alias arm is registered for the HTML
+/// lower-case spellings either: those are the emitted tokens, not accepted
+/// input.
+public enum TrackKind: String, CaseIterable, Equatable, Sendable {
+  case subtitles = "Subtitles"
+  case captions = "Captions"
+  case descriptions = "Descriptions"
+  case chapters = "Chapters"
+
+  /// The lower-case HTML token a rendering host emits for this case
+  /// (§3.6.6 obligation 1). Kept beside the case set so the two cannot drift.
+  public var htmlToken: String { rawValue.lowercased() }
+}
+
+/// `EmbedSpec.permissions` — the closed list of sandbox relaxations an embed may
+/// request (WIRE_FORMAT.md §3.6.8, Phase 1111). Bare strings on the wire, and
+/// the list is OMITTED at empty — which means TOTAL DENIAL, so the wire-cheapest
+/// document is also the most locked-down one.
+///
+/// **Declaration order here IS the render order.** §3.6.8 obligation 2 fixes the
+/// emitted token order at the vocabulary's declaration order rather than the
+/// document's, so two documents naming the same set render identically; the
+/// `CaseIterable` order below is that order, and the projection reads it rather
+/// than carrying a second list.
+///
+/// **Two relaxations are excluded rather than defaulted off, and are not
+/// reserved either**: a top-level-navigation relaxation would let a framed
+/// document navigate the page that framed it, and a downloads relaxation would
+/// put a file-save prompt in a third party's hands. Neither is admitted and
+/// neither is a name a later phase should take — which is why
+/// `"allow-top-navigation"`, the token an author reaches for from memory, is
+/// refused as `UNKNOWN_DU_CASE` rather than aliased.
+public enum EmbedPermission: String, CaseIterable, Equatable, Sendable {
+  case allowScripts = "AllowScripts"
+  case allowSameOrigin = "AllowSameOrigin"
+  case allowForms = "AllowForms"
+  case allowFullscreen = "AllowFullscreen"
+
+  /// The `sandbox` attribute token for this relaxation, or `nil` where the
+  /// relaxation is not a sandbox token at all.
+  ///
+  /// `AllowFullscreen` returns `nil` deliberately: it is a **permissions-policy
+  /// directive** riding `allow="fullscreen"`, not a sandbox relaxation. A host
+  /// that mapped the whole enum onto sandbox tokens round-trips every fixture
+  /// and fails its render obligation on `nodes/embed-permissions-1.json`, which
+  /// is authored with exactly that one permission for exactly that reason.
+  public var sandboxToken: String? {
+    switch self {
+    case .allowScripts: return "allow-scripts"
+    case .allowSameOrigin: return "allow-same-origin"
+    case .allowForms: return "allow-forms"
+    case .allowFullscreen: return nil
+    }
+  }
+
+  /// The `allow` (permissions-policy) directive for this relaxation, or `nil`
+  /// where it rides `sandbox` instead. The inverse of `sandboxToken`, and the
+  /// two are exhaustive complements by construction.
+  public var allowDirective: String? {
+    switch self {
+    case .allowFullscreen: return "fullscreen"
+    case .allowScripts, .allowSameOrigin, .allowForms: return nil
+    }
+  }
+}

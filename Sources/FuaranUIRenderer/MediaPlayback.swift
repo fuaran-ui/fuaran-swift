@@ -21,6 +21,24 @@
 //     `MediaKind.audio` case declares no slot, so this projection has nothing
 //     to read and cannot acquire something to read by a later edit here.
 //
+// Phase 1110 adds three more, all of them about the element's CHILDREN and its
+// text alternative, and all three are ones a surface gets wrong while
+// round-tripping the bytes perfectly:
+//
+//   * AUTHORED CHILD ORDER, preserved. Tracks are emitted in the order the
+//     array carries them and never re-sorted — the OPPOSITE of `srcSet`'s
+//     ascending-by-width rule, because a browser picks ONE candidate from a
+//     srcset by an algorithm (so ordering it is canonicalisation) while a
+//     reader picks a track from a menu built in DOCUMENT order (so ordering it
+//     would be rewriting someone else's menu). The two rules live in two files
+//     for that reason.
+//   * AT MOST ONE DEFAULT PER KIND, first election wins. A document electing
+//     two default captions tracks is legal BYTES — the decoder does not refuse
+//     it — so the host resolves it, and every host resolves it the same way.
+//     The later track is still emitted; only its claim on the menu is dropped.
+//   * THE TRANSCRIPT RENDERS BESIDE THE TRANSPORT, never inside it, carrying the
+//     MEDIA's resolved label as its own accessible name.
+//
 // **The pairing is made UNREPRESENTABLE rather than asserted.** `muted` is a
 // computed property returning `autoplay`, so there is no combination of stored
 // values in which the two disagree and no initialiser through which a caller
@@ -106,6 +124,99 @@ public struct MediaPlaybackPlan: Equatable, Sendable {
   /// reader pressed play on, which is the same defect as unmuted autoplay in
   /// the other direction.
   public var muted: Bool { autoplay }
+
+  /// The element's timed-text tracks — its CHILDREN, in AUTHORED order, with
+  /// every track the §19 floor refused already dropped and every surviving
+  /// track's default election already resolved (§3.6.6 obligations 2–4).
+  ///
+  /// A refused track takes the POSTER's disposition rather than the primary
+  /// source's: an element must have a source, but it need not have this track,
+  /// and a track at a refusal URL is a menu entry that opens onto nothing. So a
+  /// refused track LEAVES, and — like a refused `srcSet` candidate — it leaves
+  /// BEFORE the election, so it never occupies a kind's default slot on its way
+  /// out.
+  public let tracks: [MediaTrackPlan]
+
+  /// The text alternative, when the document declares one.
+  ///
+  /// **A PEER of the transport, never a member of `tracks`, and that is this
+  /// surface's whole statement of the beside-not-inside obligation.** `tracks`
+  /// is the element's child list; a transcript placed there would be fallback
+  /// content a browser never shows, which is why the reference emission gains a
+  /// wrapper for it. On a surface with no document, "beside" is exactly this:
+  /// two sibling fields of one plan, so an arm that renders `tracks` as children
+  /// cannot render the transcript among them.
+  public let transcript: MediaTranscriptPlan?
+}
+
+/// One `<track>`-equivalent in a media plan: a track that SURVIVED the floor,
+/// carrying its resolved values and its RESOLVED default election.
+public struct MediaTrackPlan: Equatable, Sendable {
+  public let kind: TrackKind
+  /// The floored source. Non-optional by construction — a refused track is not
+  /// in the list at all, so there is no half-present state here to render.
+  public let source: String
+  public let srcLang: String
+  public let label: String
+  /// The election AFTER resolution, which is not the same value the wire
+  /// carried: a second election of an already-defaulted kind arrives here
+  /// `false`. The track is still present; only its claim on the menu is gone.
+  public let isDefault: Bool
+}
+
+/// The transcript disclosure beside the transport.
+public struct MediaTranscriptPlan: Equatable, Sendable {
+  public let text: String
+  /// The MEDIA's resolved label, not the transcript's own text — so a reader
+  /// meeting the disclosure out of context is told which recording it
+  /// transcribes. There is no other name available: the wire gives the
+  /// transcript no label of its own, deliberately.
+  public let accessibilityLabel: String
+}
+
+/// The default track resolution: read whatever literal the wire carries.
+///
+/// A render arm passes its own `BindingContext` resolvers instead; this exists
+/// so a caller with no context (the obligation suite, a consumer inspecting a
+/// decoded tree) gets the literal case right rather than nothing at all.
+public func literalTrackText(_ text: TextSource) -> String {
+  if case .literal(let s) = text { return s }
+  return ""
+}
+
+/// The binding half of the same fallback.
+public func literalTrackBinding(_ binding: Binding) -> String {
+  binding.literalString ?? ""
+}
+
+/// Resolve, floor and elect one media element's tracks (§3.6.6 obligations
+/// 2–4), in that order.
+///
+/// **The order is the contract.** Flooring runs BEFORE the election so a refused
+/// track never occupies a kind's default slot on its way out of the list —
+/// `ImageSpec.srcSet`'s "flooring happens before the ordering" rule, at the one
+/// place where the consequence is visible: elect-then-floor would leave a kind
+/// with a default nobody can play and a perfectly good later track without one.
+/// Neither step ever REORDERS: the authored order is the document's.
+public func mediaTrackPlans(
+  _ spec: MediaSpec,
+  resolveText: (TextSource) -> String = literalTrackText,
+  resolveBinding: (Binding) -> String = literalTrackBinding
+) -> [MediaTrackPlan] {
+  var elected: Set<TrackKind> = []
+  var plans: [MediaTrackPlan] = []
+  for track in spec.tracks {
+    guard let source = FuaranUrlPolicy.sanitize(resolveBinding(track.src)), !source.isEmpty else {
+      continue
+    }
+    let honoured = track.isDefault && !elected.contains(track.kind)
+    if honoured { elected.insert(track.kind) }
+    plans.append(
+      MediaTrackPlan(
+        kind: track.kind, source: source, srcLang: track.srcLang,
+        label: resolveText(track.label), isDefault: honoured))
+  }
+  return plans
 }
 
 /// Build the plan for one `Media` node from its resolved bindings.
@@ -119,7 +230,9 @@ public struct MediaPlaybackPlan: Equatable, Sendable {
 /// poster string for an `Audio` node is harmless and ignored: the surface has
 /// nowhere to put it.
 public func mediaPlaybackPlan(
-  _ spec: MediaSpec, resolvedLabel: String, resolvedSrc: String, resolvedPoster: String? = nil
+  _ spec: MediaSpec, resolvedLabel: String, resolvedSrc: String, resolvedPoster: String? = nil,
+  resolveText: (TextSource) -> String = literalTrackText,
+  resolveBinding: (Binding) -> String = literalTrackBinding
 ) -> MediaPlaybackPlan {
   let surface: MediaSurface
   let autoplay: Bool
@@ -141,6 +254,18 @@ public func mediaPlaybackPlan(
     poster = nil
   }
 
+  // A transcript that resolves to nothing is NOT a transcript. The wire's
+  // optional says whether the document offers one; a bound slot resolving empty
+  // says the offer came to nothing, and advertising a disclosure that opens onto
+  // an empty pane is the `Tooltip` obligation-5 shape one kind over.
+  let transcript: MediaTranscriptPlan? = spec.transcript
+    .map { resolveText($0) }
+    .flatMap { text in
+      text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        ? nil
+        : MediaTranscriptPlan(text: text, accessibilityLabel: resolvedLabel)
+    }
+
   return MediaPlaybackPlan(
     surface: surface,
     accessibilityLabel: resolvedLabel,
@@ -148,5 +273,7 @@ public func mediaPlaybackPlan(
     poster: poster,
     controls: spec.controls,
     loop: spec.loop,
-    autoplay: autoplay)
+    autoplay: autoplay,
+    tracks: mediaTrackPlans(spec, resolveText: resolveText, resolveBinding: resolveBinding),
+    transcript: transcript)
 }

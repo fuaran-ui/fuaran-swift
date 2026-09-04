@@ -156,6 +156,62 @@ public enum FuaranUrlPolicy {
     return (a == "/" || a == "\\") && (b == "/" || b == "\\")
   }
 
+  /// **§19.1 — the `embed` class**: a stricter floor for a slot that EXECUTES.
+  ///
+  /// `EmbedSpec.src` does not ride `allowedSchemes`. Everything else §19 governs
+  /// is fetch-and-display or navigate-on-a-click; an embed is
+  /// fetch-and-**execute**, and the floor for it is correspondingly narrower:
+  /// normalise exactly as ``normalisedForFloor(_:)`` does and extract the scheme
+  /// exactly as ``scheme(of:)`` does — sharing both is deliberate, because that
+  /// is what makes any positional or prefix test see the string a browser's
+  /// parser will see — then **accept if and only if the scheme is `https`**.
+  ///
+  /// **Two of the exclusions are things §19 accepts, and both are deliberate.**
+  /// `http` is refused because a document delivered over a channel any
+  /// intermediary can rewrite is an intermediary's script running in a frame
+  /// this page created — a risk that does not arise when the same channel
+  /// delivers an image. And a **schemeless** reference is refused, which is the
+  /// sharper departure: a relative reference names a same-origin document, and a
+  /// same-origin frame is exactly the shape where a document granted both
+  /// `AllowSameOrigin` and `AllowScripts` can reach its own frame ELEMENT and
+  /// remove the sandbox attribute from it. A host that wants to compose its own
+  /// content has `Mount`; this kind is for the uncooperative third party.
+  ///
+  /// **The class admits no schemeless reference, so it needs no protocol-relative
+  /// test** — and that is a property rather than an omission. The general floor
+  /// needs one because its schemeless branch would otherwise admit `//host`; a
+  /// class that accepts exactly one scheme performs no positional test and
+  /// cannot inherit that surface. The check is still run on the normalised
+  /// string, so `htt\tps:` classifies as `https` exactly as it does above.
+  ///
+  /// This is a RENDER-time obligation and NOT a wire constraint: a document
+  /// naming an `http` or relative embed source is a valid wire document, the
+  /// decoder does not reject it, and this surface carries the value through
+  /// unchanged — which is why the check lives here and not in `embedSpec`.
+  public static func sanitizeEmbed(_ url: String) -> String? {
+    let trimmed = normalisedForFloor(url)
+    guard scheme(of: trimmed) == "https" else { return nil }
+    return trimmed
+  }
+
+  /// ``sanitizeEmbed(_:)``, with the refusal reason retained.
+  static func classifyEmbed(_ url: String) -> SanitizedUrl {
+    if let ok = sanitizeEmbed(url) { return .allowed(ok) }
+    let trimmed = normalisedForFloor(url)
+    let scheme = self.scheme(of: trimmed)
+    guard let scheme else {
+      return .rejected(
+        raw: url,
+        reason:
+          "the embed class admits no schemeless reference — a relative source names a same-origin document, and a same-origin frame is where a document granted both AllowSameOrigin and AllowScripts can reach its own frame element and remove the sandbox from it"
+      )
+    }
+    return .rejected(
+      raw: url,
+      reason: "the embed class accepts 'https:' only; '\(scheme):' is refused "
+        + "(an embed is fetch-and-execute, not fetch-and-display)")
+  }
+
   /// `sanitize`, with the refusal reason retained for the `SanitizedUrl` cases.
   static func classify(_ url: String) -> SanitizedUrl {
     if let ok = sanitize(url) { return .allowed(ok) }
@@ -253,6 +309,38 @@ extension MediaSpec {
     guard case .video(_, let poster) = kind, let poster else { return nil }
     return poster.sanitizedUrl
   }
+}
+
+extension EmbedSpec {
+  /// `src` put through the **`embed`** egress class (§19.1), never the general
+  /// floor. **Use this, not `src`, when the value is about to become a browsing
+  /// context.**
+  ///
+  /// Naming the class explicitly matters beyond the scheme set: a composition
+  /// that declared an origin for image egress has said nothing about which
+  /// DOCUMENTS it is willing to run, so a surface that checked an embed under
+  /// `media`'s class would let the first declaration answer the second question.
+  ///
+  /// What a refusal COSTS here is unlike every other slot on this surface, and
+  /// it is the one place a refusal does not take a substitute destination: see
+  /// `embedFramePlan`, which omits the source entirely and records the refusal
+  /// as a separate fact.
+  public var sanitizedSrc: SanitizedUrl {
+    guard let literal = src.literalString else { return .dynamic }
+    return FuaranUrlPolicy.classifyEmbed(literal)
+  }
+}
+
+extension TrackEntry {
+  /// A track file is fetched by the browser with NO user act, so it carries the
+  /// same §19 render-time obligation `src` and `poster` do (§3.6.6 obligation
+  /// 4).
+  ///
+  /// It takes the POSTER's disposition rather than the primary source's: an
+  /// element must have a source, but it need not have this track, and a track
+  /// pointing at a refusal URL is a menu entry that opens onto nothing. The
+  /// general floor, not the embed class — a caption file is fetch-and-display.
+  public var sanitizedSrc: SanitizedUrl { src.sanitizedUrl }
 }
 
 extension Action {

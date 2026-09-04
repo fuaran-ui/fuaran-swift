@@ -91,6 +91,42 @@ private func imageSpec(
 /// here.
 private let refused = "javascript:alert(1)"
 
+private func track(
+  _ kind: TrackKind, _ src: String, _ lang: String, _ label: String, isDefault: Bool = false
+) -> TrackEntry {
+  TrackEntry(
+    kind: kind, src: binding(src), srcLang: lang, label: .literal(label), isDefault: isDefault)
+}
+
+private func embedSpec(
+  src: String = "https://player.example/embed/harbour",
+  permissions: [EmbedPermission] = [],
+  aspectRatio: ImageAspect = .natural
+) -> EmbedSpec {
+  EmbedSpec(
+    src: binding(src), title: .literal("Harbour restoration, part two"),
+    permissions: permissions, aspectRatio: aspectRatio)
+}
+
+/// The corpus's own two-level hierarchy (`nodes/tree-1.json`), so the row
+/// assertions run against the shape every host is certified on rather than one
+/// invented here.
+private func treeSpec(
+  expandedStateKey: String? = nil, selectionStateKey: String? = nil
+) -> TreeSpec {
+  TreeSpec(
+    items: [
+      TreeItem(
+        id: "goods", label: .literal("Goods"),
+        children: [
+          TreeItem(id: "cocoa", label: .literal("Cocoa")),
+          TreeItem(id: "yarn", label: .literal("Yarn")),
+        ]),
+      TreeItem(id: "ledger", label: .literal("Ledger")),
+    ],
+    expandedStateKey: expandedStateKey, selectionStateKey: selectionStateKey)
+}
+
 // ─── The checkers ─────────────────────────────────────────────────────────────
 //
 // One per (kind, claim). Each pins BOTH directions where the obligation has two:
@@ -201,6 +237,252 @@ private func checkRefusedSourceDropped() throws {
     videoSpec(poster: "/walkthrough-poster.jpg"), resolvedLabel: "Walkthrough",
     resolvedSrc: "/walkthrough.mp4", resolvedPoster: "/walkthrough-poster.jpg")
   XCTAssertEqual(allowed.poster, "/walkthrough-poster.jpg", "a local poster still renders")
+
+  // §3.6.6 obligation 4 (Phase 1110) — the claim names a `track` source as well
+  // as a `poster`, and a track takes the POSTER's disposition rather than the
+  // primary source's: an element must have a source, but it need not have this
+  // track, and a track at a refusal destination is a menu entry that opens onto
+  // nothing.
+  var withTracks = videoSpec()
+  withTracks.tracks = [
+    track(.captions, refused, "en", "English captions"),
+    track(.subtitles, "/walkthrough.fr.vtt", "fr", "Sous-titres"),
+  ]
+  let trackPlan = mediaPlaybackPlan(
+    withTracks, resolvedLabel: "Walkthrough", resolvedSrc: "/walkthrough.mp4")
+  XCTAssertEqual(
+    trackPlan.tracks.map(\.srcLang), ["fr"],
+    "the refused track is dropped and the survivor is untouched")
+  XCTAssertNotNil(trackPlan.source, "the primary source is unaffected by a track's refusal")
+}
+
+// ── Media text tracks (Phase 1110) ───────────────────────────────────────────
+
+private func checkAuthoredChildOrder() throws {
+  // The corpus's `media-video-tracks-2` shape: an order NO sort produces, which
+  // is what makes this rule separately testable from `srcSet`'s. A projection
+  // that sorted by kind, by language or by label would reorder this list; the
+  // authored one is none of those.
+  var spec = videoSpec()
+  spec.tracks = [
+    track(.subtitles, "/w.fr.vtt", "fr", "Sous-titres"),
+    track(.captions, "/w.en.vtt", "en", "English captions", isDefault: true),
+    track(.descriptions, "/w.de.vtt", "de", "Audiodeskription"),
+  ]
+  let plan = mediaPlaybackPlan(spec, resolvedLabel: "Walkthrough", resolvedSrc: "/w.mp4")
+  XCTAssertEqual(
+    plan.tracks.map(\.srcLang), ["fr", "en", "de"],
+    "tracks are emitted in the AUTHORED order the wire carries, never re-sorted — a reader picks a track from a menu the user agent builds in document order, so ordering it would be rewriting someone else's menu"
+  )
+
+  // The half a single-list assertion misses: this rule is the OPPOSITE of
+  // `srcSet`'s, and the two live in two files precisely so neither can be
+  // "fixed" into the other. Assert the neighbour still sorts, or a change that
+  // unified them would pass both obligations while breaking one.
+  let imagePlan = imagePresentationPlan(
+    imageSpec(srcSet: [("/b.jpg", 800), ("/a.jpg", 400)]),
+    resolvedSrc: "/harbour.jpg",
+    resolvedCandidates: [(url: "/b.jpg", width: 800), (url: "/a.jpg", width: 400)])
+  XCTAssertEqual(
+    imagePlan.candidates.map(\.width), [400, 800],
+    "…while a srcset IS re-ordered: a browser picks one candidate by an algorithm, so ordering it is canonicalisation"
+  )
+}
+
+private func checkSingleDefaultPerKind() throws {
+  var spec = videoSpec()
+  spec.tracks = [
+    track(.captions, "/w.en.vtt", "en", "English captions", isDefault: true),
+    track(.captions, "/w.en-verbose.vtt", "en", "English captions (verbose)", isDefault: true),
+    track(.subtitles, "/w.fr.vtt", "fr", "Sous-titres", isDefault: true),
+  ]
+  let plan = mediaPlaybackPlan(spec, resolvedLabel: "Walkthrough", resolvedSrc: "/w.mp4")
+
+  XCTAssertEqual(plan.tracks.count, 3, "the later election is still EMITTED — only its claim is dropped")
+  XCTAssertEqual(
+    plan.tracks.map(\.isDefault), [true, false, true],
+    "the FIRST election of a kind is honoured and a later one carries no default; the election is per KIND, so a captions default and a subtitles default coexist"
+  )
+
+  // Two halves a one-document assertion misses. A document electing two
+  // defaults is legal BYTES — the decoder must not refuse it, or this whole
+  // resolution would be unreachable…
+  let json = #"""
+    {"id":"m","kind":{"$type":"Media","kind":{"$type":"Video"},"label":"W","src":{"$type":"Static","value":"/w.mp4"},"tracks":[{"default":true,"kind":"Captions","label":"A","src":{"$type":"Static","value":"/a.vtt"},"srcLang":"en"},{"default":true,"kind":"Captions","label":"B","src":{"$type":"Static","value":"/b.vtt"},"srcLang":"en"}]}}
+    """#
+  guard case .media(let decoded) = try RenderProjection.decodeNode(json).kind else {
+    return XCTFail("a double election is legal bytes and must decode")
+  }
+  XCTAssertEqual(decoded.tracks.map(\.isDefault), [true, true], "the WIRE keeps both elections")
+
+  // …and the resolution must not fire where nothing competes, or a projection
+  // that simply dropped every default would pass the assertion above.
+  var single = videoSpec()
+  single.tracks = [track(.captions, "/w.en.vtt", "en", "English captions", isDefault: true)]
+  let singlePlan = mediaPlaybackPlan(single, resolvedLabel: "W", resolvedSrc: "/w.mp4")
+  XCTAssertEqual(singlePlan.tracks.map(\.isDefault), [true], "an uncontested election is honoured")
+}
+
+private func checkTranscriptDisclosureNamed() throws {
+  var spec = audioSpec()
+  spec.transcript = .literal("The harbour was rebuilt twice: once after the storm of 1908.")
+  let plan = mediaPlaybackPlan(spec, resolvedLabel: "Curator commentary", resolvedSrc: "/c.mp3")
+
+  guard let transcript = plan.transcript else {
+    return XCTFail("a declared transcript must reach the plan")
+  }
+  XCTAssertEqual(
+    transcript.accessibilityLabel, "Curator commentary",
+    "the disclosure carries the MEDIA's resolved label as its own accessible name, so a reader meeting it out of context is told which recording it transcribes"
+  )
+  XCTAssertTrue(transcript.text.hasPrefix("The harbour"), "and the text itself")
+
+  // BESIDE the transport, never INSIDE it. On a surface with no document that
+  // is exactly this: `tracks` is the element's child list and the transcript is
+  // a PEER field, so an arm rendering children cannot render it among them. A
+  // transcript smuggled into the child list would show up here as a fourth
+  // track and as a `<track>` a browser would never display.
+  XCTAssertTrue(
+    plan.tracks.isEmpty,
+    "the transcript is not a member of the element's children — placed there a browser would treat it as fallback content and never show it")
+
+  // Absent means absent, and an EMPTY declaration is not an offer: advertising a
+  // disclosure that opens onto nothing is the `Tooltip` obligation-5 shape one
+  // kind over.
+  XCTAssertNil(
+    mediaPlaybackPlan(audioSpec(), resolvedLabel: "C", resolvedSrc: "/c.mp3").transcript)
+  var blank = audioSpec()
+  blank.transcript = .literal("   ")
+  XCTAssertNil(
+    mediaPlaybackPlan(blank, resolvedLabel: "C", resolvedSrc: "/c.mp3").transcript,
+    "a transcript resolving to whitespace is no transcript")
+}
+
+// ── Embed (Phase 1111) ───────────────────────────────────────────────────────
+
+private func checkEmbedAccessibleNameAlways() throws {
+  // Every shape, because the title is mandatory for the KIND: a projection
+  // carrying it only where a source survived, or only where permissions were
+  // declared, passes a narrower test.
+  for (spec, src, name) in [
+    (embedSpec(), "https://player.example/embed/harbour", "a plain embed"),
+    (embedSpec(permissions: [.allowScripts]), "https://player.example/embed/harbour", "a permitted embed"),
+    (embedSpec(src: "http://player.example/x"), "http://player.example/x", "a refused embed"),
+  ] {
+    let plan = embedFramePlan(spec, resolvedTitle: "Harbour restoration, part two", resolvedSrc: src)
+    XCTAssertEqual(
+      plan.title, "Harbour restoration, part two",
+      "\(name) carries the resolved title as its accessible name — a frame is a focus container a reader tabs INTO, so there is no decorative case")
+  }
+}
+
+private func checkSandboxAlwaysExactlyDeclared() throws {
+  // ALWAYS, and EMPTY when nothing is granted. This is the obligation a surface
+  // fails by writing the obvious code — omitting the declaration on a
+  // permissionless embed produces the same result as an UNSANDBOXED frame.
+  let bare = embedFramePlan(embedSpec(), resolvedTitle: "T", resolvedSrc: "https://e.example/x")
+  XCTAssertEqual(bare.sandbox, [], "an empty sandbox, which is total denial — never an absent one")
+
+  // …and the type is what makes the always-half unfalsifiable: `sandbox` is
+  // `[String]`, so there is no representation of "no sandbox" for an arm to
+  // reach. Asserting the emptiness above without this would be asserting a
+  // value where the guarantee is a TYPE.
+  XCTAssertFalse(
+    "\(type(of: bare.sandbox))".contains("Optional"),
+    "the sandbox declaration is non-optional by construction; an Optional would make the unsandboxed frame expressible")
+
+  // EXACTLY the declared relaxations, in the VOCABULARY's declaration order,
+  // de-duplicated — so two documents naming the same set render identically
+  // however they authored it.
+  let scrambled = embedFramePlan(
+    embedSpec(permissions: [.allowForms, .allowSameOrigin, .allowScripts, .allowForms]),
+    resolvedTitle: "T", resolvedSrc: "https://e.example/x")
+  XCTAssertEqual(
+    scrambled.sandbox, ["allow-scripts", "allow-same-origin", "allow-forms"],
+    "declaration order, de-duplicated — never the document's order")
+
+  // `AllowFullscreen` is NOT a sandbox token. The corpus fixture carries exactly
+  // that one permission for exactly this reason: a host that mapped the whole
+  // enum onto sandbox tokens round-trips every other fixture and fails here.
+  let fullscreen = embedFramePlan(
+    embedSpec(permissions: [.allowFullscreen]), resolvedTitle: "T",
+    resolvedSrc: "https://e.example/x")
+  XCTAssertEqual(
+    fullscreen.sandbox, [],
+    "fullscreen is a permissions-policy directive, not a sandbox relaxation")
+  XCTAssertEqual(fullscreen.allow, ["fullscreen"], "…and it rides `allow` instead")
+  XCTAssertEqual(
+    bare.allow, [],
+    "an empty `allow` means the attribute is ABSENT — not the same statement as an empty sandbox, and only the sandbox's absence is dangerous")
+}
+
+private func checkRefusedEmbedSourceOmitted() throws {
+  // The `embed` class (§19.1) is NARROWER than the general floor, and each of
+  // these three is a value §19 accepts elsewhere. A surface reusing the general
+  // floor here passes the javascript case and fails all three.
+  for (src, why) in [
+    ("http://player.example/x", "http is refused — a document any intermediary can rewrite is that intermediary's script running in a frame this page created"),
+    ("/local/embed.html", "a schemeless reference is refused — a same-origin frame is where a document granted AllowSameOrigin + AllowScripts can remove the sandbox from its own frame element"),
+    (refused, "and every scheme the general floor refuses stays refused"),
+  ] {
+    let plan = embedFramePlan(embedSpec(src: src), resolvedTitle: "T", resolvedSrc: src)
+    XCTAssertNil(plan.source, why)
+    XCTAssertTrue(
+      plan.sourceRefused,
+      "…and the refusal is RECORDED: 'nothing was declared' and 'this was refused' stay different facts")
+    XCTAssertEqual(
+      plan.title, "T", "the frame still renders, still named — a refusal costs the source, not the element")
+  }
+
+  // The allow twin. Without it a projection that refused EVERY source would
+  // pass every assertion above and this obligation would guard nothing.
+  let ok = embedFramePlan(
+    embedSpec(), resolvedTitle: "T", resolvedSrc: "https://player.example/embed/harbour")
+  XCTAssertEqual(ok.source, "https://player.example/embed/harbour", "an https document is admitted")
+  XCTAssertFalse(ok.sourceRefused)
+
+  // And the third state: nothing declared at all is NOT a refusal. An
+  // `Optional` alone cannot tell those apart, which is why the plan carries
+  // both facts.
+  let undeclared = embedFramePlan(embedSpec(src: ""), resolvedTitle: "T", resolvedSrc: "")
+  XCTAssertNil(undeclared.source)
+  XCTAssertFalse(
+    undeclared.sourceRefused,
+    "an unresolved source is not an egress refusal — telling a reader their destination was rejected when the document never named one is a wrong diagnosis")
+}
+
+// ── Tree (Phase 1120) ────────────────────────────────────────────────────────
+
+private func checkTreeAccessibleNameAlways() throws {
+  let rows = flattenTreeRows(treeRowPlans(treeSpec()))
+  XCTAssertEqual(rows.count, 4, "two roots and two children")
+
+  // EVERY row, including the parent — a treeitem OWNS its child group, so a
+  // name computed from contents would read the whole branch out as the row's
+  // own name.
+  XCTAssertEqual(
+    rows.map(\.label), ["Goods", "Cocoa", "Yarn", "Ledger"],
+    "every row states its OWN visible label as its accessible name")
+
+  guard let goods = rows.first(where: { $0.id == "goods" }) else {
+    return XCTFail("the parent row must be projected")
+  }
+  XCTAssertTrue(goods.hasChildren)
+  XCTAssertEqual(
+    goods.label, "Goods",
+    "the parent's name is 'Goods' and NOT 'Goods Cocoa Yarn' — the failure mode this obligation exists for is a name that grew its branch")
+  XCTAssertFalse(
+    goods.label.contains("Cocoa"),
+    "…stated as the negative too, because a computed name passes an equality test on a leaf and fails only on a parent")
+
+  // The name is the row's own label whatever the row's state, so a collapsed or
+  // unselected row is not left nameless.
+  let stateful = flattenTreeRows(
+    treeRowPlans(
+      treeSpec(expandedStateKey: "openRows", selectionStateKey: "selectedRow"),
+      expandedIds: [], selectedId: "ledger"))
+  XCTAssertEqual(stateful.map(\.label), ["Goods", "Cocoa", "Yarn", "Ledger"])
+  XCTAssertTrue(stateful.allSatisfy { !$0.label.isEmpty }, "no row is ever nameless")
 }
 
 private func checkAnchorAffordanceOnExpandable() throws {
@@ -338,6 +620,13 @@ private let checkers: [String: @Sendable () throws -> Void] = [
   "Media/autoplay-muted-pairing": checkAutoplayMutedPairing,
   "Media/no-autoplay-pathway": checkNoAutoplayPathway,
   "Media/refused-source-dropped": checkRefusedSourceDropped,
+  "Media/authored-child-order": checkAuthoredChildOrder,
+  "Media/single-default-per-kind": checkSingleDefaultPerKind,
+  "Media/transcript-disclosure-named": checkTranscriptDisclosureNamed,
+  "Embed/accessible-name-always": checkEmbedAccessibleNameAlways,
+  "Embed/sandbox-always-exactly-declared": checkSandboxAlwaysExactlyDeclared,
+  "Embed/refused-embed-source-omitted": checkRefusedEmbedSourceOmitted,
+  "Tree/accessible-name-always": checkTreeAccessibleNameAlways,
   "Image/anchor-affordance-on-expandable": checkAnchorAffordanceOnExpandable,
   "Image/refused-src-no-affordance": checkRefusedSrcNoAffordance,
   "Image/srcset-ascending-by-width": checkSrcSetAscendingByWidth,
@@ -529,6 +818,19 @@ final class RenderObligationTests: XCTestCase {
   func testOwesMediaAutoplayMutedPairing() throws { try run("Media/autoplay-muted-pairing") }
   func testOwesMediaNoAutoplayPathway() throws { try run("Media/no-autoplay-pathway") }
   func testOwesMediaRefusedSourceDropped() throws { try run("Media/refused-source-dropped") }
+  func testOwesMediaAuthoredChildOrder() throws { try run("Media/authored-child-order") }
+  func testOwesMediaSingleDefaultPerKind() throws { try run("Media/single-default-per-kind") }
+  func testOwesMediaTranscriptDisclosureNamed() throws {
+    try run("Media/transcript-disclosure-named")
+  }
+  func testOwesEmbedAccessibleNameAlways() throws { try run("Embed/accessible-name-always") }
+  func testOwesEmbedSandboxAlwaysExactlyDeclared() throws {
+    try run("Embed/sandbox-always-exactly-declared")
+  }
+  func testOwesEmbedRefusedEmbedSourceOmitted() throws {
+    try run("Embed/refused-embed-source-omitted")
+  }
+  func testOwesTreeAccessibleNameAlways() throws { try run("Tree/accessible-name-always") }
   func testOwesImageAnchorAffordanceOnExpandable() throws {
     try run("Image/anchor-affordance-on-expandable")
   }
@@ -545,7 +847,11 @@ final class RenderObligationTests: XCTestCase {
   func testEveryRegisteredCheckerHasAMethod() {
     let named = Set([
       "Media/accessible-name-always", "Media/autoplay-muted-pairing", "Media/no-autoplay-pathway",
-      "Media/refused-source-dropped", "Image/anchor-affordance-on-expandable",
+      "Media/refused-source-dropped", "Media/authored-child-order",
+      "Media/single-default-per-kind", "Media/transcript-disclosure-named",
+      "Embed/accessible-name-always", "Embed/sandbox-always-exactly-declared",
+      "Embed/refused-embed-source-omitted", "Tree/accessible-name-always",
+      "Image/anchor-affordance-on-expandable",
       "Image/refused-src-no-affordance", "Image/srcset-ascending-by-width",
       "Custom/unregistered-custom-labelled",
     ])

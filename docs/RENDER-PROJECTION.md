@@ -319,14 +319,21 @@ Every one of the kinds has an arm; what differs is how much each arm paints.
 - **Real** — layout containers (including masonry), headings, markdown, math,
   code blocks, lists, metrics with the trend glyph and sentiment tint, badges,
   callouts, toasts, facts, label/value rows, icons, progress, skeletons, tabs,
-  steppers, disclosures, the vector drawing canvas, and the data grid with its
-  twelve cell kinds.
-- **Rendered but not interactive** — a link is styled text with no gesture.
+  steppers, disclosures, the vector drawing canvas, the **tree** with its
+  full row structure, and the data grid with its twelve cell kinds.
+- **Rendered but not interactive** — a link is styled text with no gesture; a
+  tree renders its whole hierarchy, its labels and its open/closed state, but the
+  six key bindings are an interactive host's addition over that identical
+  structure.
 - **Placeholder with the full plan applied** — an image reserves its aspect,
   binds its caption and decides its expansion affordance, but there is **no
-  network image loader**; media discharges all three of its obligations in the
-  plan and renders a labelled transport tile, but there is **no playback
-  engine**. Pulling either in is not a decision a decoding surface makes for you.
+  network image loader**; media discharges all six of its obligations in the plan
+  — including the track menu, in authored order with its default election
+  resolved — and renders a labelled transport tile beside its transcript
+  disclosure, but there is **no playback engine**; an embed discharges all three
+  of its obligations, sandbox declaration included, but there is **no browsing
+  context**. Pulling any of them in is not a decision a decoding surface makes
+  for you.
 - **Descriptive only** — chart, map, sparkline, mount, fragment reference.
 
 ### Interaction, and the boundary it does not cross
@@ -368,22 +375,32 @@ under a right-looking key.
 
 ## What is pending — stated plainly
 
-- **The most recent platform-baseline wave has not been adopted here.** The
-  shared corpus carries node kinds `Embed` and `Tree` and form-field kinds
-  `Tokens`, `Rating` and `Color`, none of which this surface models; and
-  `WriteToClipboard` has widened from a bare string to a text source, so a bound
-  payload is refused as `WRONG_TYPE`. Seventeen node fixtures and eleven reject
-  fixtures name that vocabulary. The reject ones matter most: they answer with
-  the wrong code and path rather than the pinned one, and while that stands a
-  genuine regression in the reject leg is invisible.
-- **`FileUpload` silently drops four newer slots.** `capture`, `destination`,
-  `dropTarget` and `acceptPaste` decode fine and fall on the floor — a different
-  and quieter failure than a refusal.
-- **The render-obligation roster is short by nine claims.** The artefact declares
-  nineteen; this surface registers eight checkers and two declared exemptions.
-  The remaining nine report as *unchecked with no checker registered*, which
-  **reds that gate against today's corpus** — the mechanism working exactly as
-  designed. Not checked is not passed, and silence is never an answer.
+- **Five capabilities of the platform-baseline wave ARE adopted** — media text
+  tracks, `Embed`, the tooltip trait, `Combobox` and `Tree`. Every node fixture in
+  the shared corpus now decodes, and eleven reject vectors that previously
+  answered with the wrong code (or, for the two track vectors and the tooltip
+  one, **accepted a malformed document outright**) now refuse with the pinned code
+  and path.
+- **What the wave still owes here**, all of it outside those five: form-field
+  kinds `Tokens`, `Rating` and `Color` are unmodelled; `WriteToClipboard` has
+  widened from a bare string to a text source, so a bound payload is refused as
+  `WRONG_TYPE`; `FileUpload` silently drops `capture`, `destination`, `dropTarget`
+  and `acceptPaste`; `Modal.modality` and `SemanticStyle.direction` are accepted
+  permissively where the corpus pins a refusal; and the four print-break controls
+  are likewise unmodelled. Ten reject vectors name that residue, and the corpus
+  reject leg is red on exactly those ten.
+- **The render-obligation roster is short by two claims**, down from nine. The
+  artefact declares nineteen; this surface registers fifteen checkers and two
+  declared exemptions. The two that remain — `FileUpload/picker-always-present`
+  and `Modal/aria-modal-only-when-blocking` — report as *unchecked with no checker
+  registered*, which **reds that gate against today's corpus**, and they are
+  deliberately left that way rather than exempted. An exemption is a statement
+  that this surface structurally cannot check a claim; these two are unchecked
+  because the surface does not yet model the SLOTS the claims are about, which is
+  unadopted work rather than a platform limit. Declaring an exemption would turn
+  the gate green over a capability nobody has adopted, which is the one thing the
+  mechanism exists to prevent. Not checked is not passed, and silence is never an
+  answer.
 - **Three adoption bars are open**: contract cards, timed advance, and streamed
   upload. A host that has not adopted is not thereby exempt — it owes the
   obligation and has simply not made its answer visible.

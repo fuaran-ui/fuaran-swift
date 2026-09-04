@@ -77,6 +77,9 @@ public enum WireLimits {
 final class WireWalkState {
   private var nodeDepth = 0
   private var nodes = 0
+  /// The §21.5 item axis — see ``enterItem(_:)``. Separate from ``nodeDepth`` because a
+  /// whole hierarchy lives inside one node and consumes no node depth at all.
+  private var itemDepth = 0
 
   /// Called on the way DOWN, before the recursion that would breach the bound (§21.2 rule
   /// 4) — never afterwards by measuring the tree that was built. A check that runs after
@@ -99,6 +102,41 @@ final class WireWalkState {
           + "expected a tree of no more than \(WireLimits.maxNodes) nodes in total")
     }
     nodeDepth += 1
+  }
+
+  /// §21.5 (Phase 1120) — the THIRD recursion axis, bounded separately for the reason the
+  /// op axis is.
+  ///
+  /// A `Tree`'s rows nest inside ONE node, so ``enterNode(_:)`` cannot see them at all
+  /// however deep they go, and at roughly two JSON levels per row the syntactic bound is
+  /// not reached either — the same two false comforts the `TreeOp.Batch` axis sprang, at a
+  /// new slot. So item nesting is counted from the root row list on its own axis, and a
+  /// breach is refused on the way DOWN.
+  ///
+  /// **The FIGURE is ``WireLimits/maxNodeDepth``, reused rather than a sixth limit
+  /// minted.** These frames cost what the node decoder's frames cost, so a second number
+  /// would be two figures for one per-frame budget and every host would have to carry
+  /// both. The rule generalises past both axes: *any* self-referential record this format
+  /// grows is bounded by that figure on its own axis, on the day it lands.
+  ///
+  /// Note it does NOT feed ``WireLimits/maxNodes``: a `TreeItem` is not a `Node`, and
+  /// counting one as the other would let a wide hierarchy exhaust a budget that exists to
+  /// bound a different population.
+  func enterItem(_ path: String) throws {
+    if itemDepth >= WireLimits.maxNodeDepth {
+      throw FuaranDecodeError(
+        code: .limitExceeded, path: path,
+        message:
+          "tree-item nesting deeper than the wire limit maxNodeDepth = "
+          + "\(WireLimits.maxNodeDepth); expected a hierarchy nesting rows no more than "
+          + "\(WireLimits.maxNodeDepth) levels deep")
+    }
+    itemDepth += 1
+  }
+
+  /// Paired with ``enterItem(_:)`` through `defer`, on the ``exitNode()`` argument.
+  func exitItem() {
+    itemDepth -= 1
   }
 
   /// Paired with ``enterNode(_:)`` through `defer`, which is what makes it correct on the

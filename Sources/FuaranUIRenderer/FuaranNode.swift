@@ -63,9 +63,42 @@
   @MainActor
   func fuaranNodeBody(_ node: Node, _ ctx: BindingContext) -> AnyView {
     ctx.coverage?.count(node.kind.typeName)
-    let body = fuaranNodeKindBody(node, ctx)
+    let kindBody = fuaranNodeKindBody(node, ctx)
+    // §3.1 (Phase 1112) — the tooltip trait. A DESCRIPTION, never a name, so it
+    // lands on `accessibilityHint` (this platform's supplementary-description
+    // channel, `aria-describedby`'s role) and NEVER on `accessibilityLabel`;
+    // and the hint is RENDERED adjacent to the node's own body rather than
+    // revealed on a timer, which is how obligation 3's hoverable + persistent
+    // halves are satisfied structurally instead of by timing code.
+    //
+    // Applied BEFORE the accessibility projection, so a node-level
+    // `Accessibility.label` still wins the NAME — the two slots say different
+    // things and an icon-only control needs both.
+    let body = fuaranTooltipBody(kindBody, tooltipProjection(node, resolveText: ctx.resolveText))
     let projection = accessibilityProjection(node.accessibility, ctx)
     return projection.isEmpty ? body : body.fuaranAccessibility(projection)
+  }
+
+  /// Apply a projected tooltip, or return the body untouched.
+  ///
+  /// **Nothing at all when there is no hint** (§3.1 obligation 5): no rendered
+  /// element and no description. Advertising a description that is not there is
+  /// worse than silence, and `tooltipProjection` already returns `nil` for a
+  /// hint that resolves to empty or whitespace — so the emptiness rule lives in
+  /// the pure projection, asserted on every platform, and this arm only applies
+  /// it.
+  @MainActor
+  func fuaranTooltipBody(_ body: AnyView, _ tooltip: TooltipProjection?) -> AnyView {
+    guard let tooltip else { return body }
+    return AnyView(
+      VStack(alignment: .leading, spacing: 2) {
+        body
+        Text(tooltip.hint)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      .accessibilityHint(Text(tooltip.hint)))
   }
 
   /// The kind dispatch: an **exhaustive `switch` with no `default`** over the
@@ -100,6 +133,8 @@
     case .link(let k): return AnyView(RenderLink(k: k, ctx: ctx))
     case .image(let k): return AnyView(RenderImage(k: k, ctx: ctx))
     case .media(let k): return AnyView(RenderMedia(k: k, ctx: ctx))
+    case .embed(let k): return AnyView(RenderEmbed(k: k, ctx: ctx))
+    case .tree(let k): return AnyView(RenderTree(k: k, ctx: ctx))
     case .list(let k): return AnyView(RenderList(k: k, ctx: ctx))
     case .toast(let k): return AnyView(RenderToast(k: k, ctx: ctx))
     case .codeBlock(let k): return AnyView(RenderCodeBlock(code: k.code))
@@ -513,6 +548,157 @@
     }
   }
 
+  /// §3.6.8 (Phase 1111) — the sandboxed third-party embed.
+  ///
+  /// **The floor has no browsing context**, so the arm is a labelled frame
+  /// placeholder reporting the declarations it would honour — the `RenderMedia`
+  /// boundary, at the kind where honouring them means running somebody else's
+  /// document. That boundary is smaller than it looks: every obligation is a
+  /// decision about what a surface MAY do, all three are discharged in
+  /// `embedFramePlan`, and all three are asserted on every platform. What waits
+  /// is the frame, not the contract.
+  ///
+  /// The arm reads `plan.source` and never `k.src`: the `embed` egress class is
+  /// what stands between a decoded tree and a document that executes, and a
+  /// future arm that gains a real frame inherits the refusal by reading the same
+  /// field.
+  private struct RenderEmbed: View {
+    let k: EmbedSpec
+    let ctx: BindingContext
+    var body: some View {
+      let plan = embedFramePlan(
+        k, resolvedTitle: ctx.resolveText(k.title), resolvedSrc: ctx.resolve(k.src))
+      return VStack(alignment: .leading, spacing: 2) {
+        Text(plan.title).font(.system(size: 12, weight: .semibold))
+        Text(frameSummary(plan)).font(.system(size: 9)).foregroundStyle(.secondary)
+      }
+      .padding(8)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Color.gray.opacity(0.08))
+      .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.35), lineWidth: 1))
+      .clipShape(RoundedRectangle(cornerRadius: 4))
+      .accessibilityLabel(Text(plan.title))
+    }
+
+    /// The declarations the placeholder reports.
+    ///
+    /// The sandbox is named ALWAYS and named EMPTY when nothing is granted —
+    /// never omitted — because an omitted declaration and an empty one are the
+    /// difference between a sandboxed frame and an unsandboxed one, and a
+    /// summary that hid the distinction would hide exactly the fact this kind's
+    /// first obligation is about.
+    private func frameSummary(_ plan: EmbedFramePlan) -> String {
+      var parts: [String] = []
+      parts.append(plan.source ?? (plan.sourceRefused ? "source refused" : "no source"))
+      parts.append("sandbox=[" + plan.sandbox.joined(separator: " ") + "]")
+      if !plan.allow.isEmpty { parts.append("allow=" + plan.allow.joined(separator: " ")) }
+      if plan.aspectRatio != .natural { parts.append(plan.aspectRatio.rawValue) }
+      if plan.lazyLoading { parts.append("lazy") }
+      return parts.joined(separator: " · ")
+    }
+  }
+
+  /// §3.6.12 (Phase 1120) — recursive disclosure with tree semantics.
+  ///
+  /// A REAL render, not a placeholder: the hierarchy, the labels, the icons, the
+  /// indentation and the open/closed state all come off `treeRowPlans`, which
+  /// computes them from the wire plus the two named State slots. Movement — the
+  /// six key bindings — is an interactive host's addition over this identical
+  /// structure and is deliberately not here (obligation 6).
+  ///
+  /// **The row's accessible name is its own label** (obligation 5), which on
+  /// this platform means the row view is one accessibility element with a stated
+  /// label: without `.accessibilityElement(children: .ignore)` a parent row
+  /// would announce its whole branch, which is precisely the failure the
+  /// obligation exists to prevent.
+  private struct RenderTree: View {
+    let k: TreeSpec
+    let ctx: BindingContext
+    var body: some View {
+      let rows = treeRowPlans(
+        k,
+        expandedIds: expandedIds(),
+        selectedId: k.selectionStateKey.flatMap { ctx.state[$0] }.map(jsonScalar),
+        resolveText: ctx.resolveText)
+      return VStack(alignment: .leading, spacing: 1) {
+        RenderTreeRows(rows: rows)
+      }
+      .padding(4)
+    }
+
+    /// The expansion set, or `nil` where the document names no key at all.
+    ///
+    /// The two are different states and the distinction is load-bearing: `nil`
+    /// renders FULLY EXPANDED (a tree with no reader-driven affordance still
+    /// shows its content), where an empty set is a document that named a key
+    /// over which every row is closed. A state value of some other shape reads
+    /// as EMPTY rather than as an error — this is the host's own slot, not a
+    /// wire document, and refusing would blank a tree over a value the reader
+    /// never authored.
+    private func expandedIds() -> Set<String>? {
+      guard let key = k.expandedStateKey else { return nil }
+      guard case .array(let items)? = ctx.state[key] else { return [] }
+      return Set(
+        items.compactMap { item -> String? in
+          if case .string(let id) = item { return id }
+          return nil
+        })
+    }
+  }
+
+  /// The recursive half.
+  ///
+  /// `body` is `AnyView` and NOT `some View`, and that is a language constraint
+  /// rather than a style choice: this view renders itself for a row's children,
+  /// so an opaque return type would be defined in terms of itself and the
+  /// compiler would refuse it. The dispatch spine erases for the same reason.
+  private struct RenderTreeRows: View {
+    let rows: [TreeRowPlan]
+    var body: AnyView {
+      AnyView(
+        ForEach(rows.indices, id: \.self) { i in
+          let row = rows[i]
+          VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 4) {
+            // The disclosure marker is emitted on rows that HAVE children and on
+            // no others: on a leaf it would assert a subtree that does not
+            // exist, and a reader would be told there is more when there is not.
+              if let expanded = row.expanded {
+                Text(expanded ? "▾" : "▸").font(.system(size: 9)).foregroundStyle(.secondary)
+              } else {
+                Text(" ").font(.system(size: 9))
+              }
+              if let icon = row.icon {
+                Text(icon).font(.system(size: 9)).foregroundStyle(.secondary)
+              }
+              Text(row.label).font(.system(size: 12))
+              if row.selected == true {
+                Text("•").font(.system(size: 9)).foregroundStyle(.secondary)
+              }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(row.label))
+            // Only the widget's single tab stop is a focus stop; every other row
+            // is reachable by the arrow keys an interactive host adds.
+            .accessibilityAddTraits(Self.traits(row))
+
+            if row.hasChildren, row.expanded == true {
+              RenderTreeRows(rows: row.children).padding(.leading, 12)
+            }
+          }
+        })
+    }
+
+    /// Spelled out rather than written inline, so the empty case has a declared
+    /// type: an `AccessibilityTraits` option set and a bare `[]` literal do not
+    /// unify on their own in a ternary.
+    private static func traits(_ row: TreeRowPlan) -> AccessibilityTraits {
+      var out: AccessibilityTraits = []
+      if row.selected == true { out.insert(.isSelected) }
+      return out
+    }
+  }
+
   private struct RenderCallout: View {
     @Environment(\.fuaranTones) private var tones
     let k: CalloutSpec
@@ -694,7 +880,10 @@
   private struct RenderMedia: View {
     let k: MediaSpec
     let ctx: BindingContext
-    var body: some View {
+    // `AnyView` rather than an opaque `some View`: the transcript arm returns a
+    // different composition from the bare one, and an opaque return type must be
+    // one type on every path.
+    var body: AnyView {
       let plan = mediaPlaybackPlan(
         k,
         resolvedLabel: ctx.resolveText(k.label),
@@ -702,20 +891,60 @@
         resolvedPoster: { () -> String? in
           if case .video(_, let poster) = k.kind, let poster { return ctx.resolve(poster) }
           return nil
-        }())
+        }(),
+        resolveText: ctx.resolveText,
+        resolveBinding: ctx.resolve)
       let glyph = plan.surface == .video ? "play.rectangle" : "waveform"
-      return HStack(spacing: 6) {
-        Image(systemName: glyph).font(.system(size: 14))
-        VStack(alignment: .leading, spacing: 1) {
-          Text(plan.accessibilityLabel).font(.system(size: 11))
-          Text(transportSummary(plan)).font(.system(size: 9)).foregroundStyle(.secondary)
+      // Rendered before the view builder rather than inside its `ForEach`, so
+      // the closure captures a local array instead of `self`.
+      let trackLines = plan.tracks.map(Self.trackSummary)
+      let transport =
+        HStack(spacing: 6) {
+          Image(systemName: glyph).font(.system(size: 14))
+          VStack(alignment: .leading, spacing: 1) {
+            Text(plan.accessibilityLabel).font(.system(size: 11))
+            Text(transportSummary(plan)).font(.system(size: 9)).foregroundStyle(.secondary)
+            // The tracks are the element's CHILDREN, in the plan's order —
+            // which is the AUTHORED order, never re-sorted. The floor has no
+            // player, so what the placeholder shows is the menu a user agent
+            // would build from them, in the order it would build it.
+            ForEach(trackLines.indices, id: \.self) { i in
+              Text(trackLines[i])
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+            }
+          }
+          Spacer(minLength: 0)
         }
-        Spacer(minLength: 0)
-      }
-      .padding(6)
-      .background(Color.gray.opacity(0.08))
-      .clipShape(RoundedRectangle(cornerRadius: 4))
-      .accessibilityLabel(Text(plan.accessibilityLabel))
+        .padding(6)
+        .background(Color.gray.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .accessibilityLabel(Text(plan.accessibilityLabel))
+
+      // §3.6.6 — the transcript renders as a disclosure BESIDE the transport,
+      // never inside it, carrying the MEDIA's resolved label as its own
+      // accessible name. On this platform "beside" is a sibling in the stack:
+      // a transcript placed among the tracks would be the fallback content a
+      // browser never shows, one platform over.
+      guard let transcript = plan.transcript else { return AnyView(transport) }
+      return AnyView(
+        VStack(alignment: .leading, spacing: 4) {
+          transport
+          DisclosureGroup {
+            Text(transcript.text).font(.system(size: 11))
+          } label: {
+            Text("Transcript").font(.system(size: 11, weight: .semibold))
+          }
+          .accessibilityLabel(Text(transcript.accessibilityLabel))
+        })
+    }
+
+    /// One track's menu entry. The default election shown here is the RESOLVED
+    /// one, so a second election of an already-defaulted kind reads without the
+    /// marker — which is what the obligation says the emitted track does.
+    private static func trackSummary(_ track: MediaTrackPlan) -> String {
+      let mark = track.isDefault ? " ✓" : ""
+      return "\(track.kind.htmlToken) · \(track.srcLang) · \(track.label)\(mark)"
     }
 
     /// The declarations the placeholder reports, in the plan's own vocabulary.
@@ -832,9 +1061,10 @@
   /// * **Wired** — `.text` / `.number` (`StatefulTextField`) and `.checkbox`
   ///   (`StatefulToggle`) are live controls that commit through `stateKeyOf(value)` to
   ///   `FuaranHost.writeBack`.
-  /// * **Inert by construction** — `.choice`, `.date`, `.textArea`, `.range`, `.rangedNumber`
-  ///   are `.disabled(true)` over a `.constant` binding, and `.segmentedChoice` / `.dateRange`
-  ///   are plain `Text`. The user cannot edit them at all, so there is no input to drop.
+  /// * **Inert by construction** — `.choice`, `.combobox`, `.date`, `.textArea`, `.range`,
+  ///   `.rangedNumber` are `.disabled(true)` over a `.constant` binding, and `.segmentedChoice` /
+  ///   `.dateRange` are plain `Text`. The user cannot edit them at all, so there is no input to
+  ///   drop.
   ///
   /// That second group is a **render floor, not the Kotlin defect class**. The sibling host had
   /// live, editable controls whose `onValueChange` updated a local buffer and never reached the
@@ -860,6 +1090,25 @@
         StatefulTextField(label: label, initial: ctx.resolve(value), stateKey: stateKeyOf(value))
       case .choice(_, let value, _), .date(let value, _, _, _, _, _):
         labelled(label) { TextField("", text: .constant(ctx.resolve(value))).disabled(true) }
+      // §3.6.9 (Phase 1113) — the searchable form of `choice`, rendered on
+      // `choice`'s own control because the two ARE the same value contract; a
+      // document migrating between them changes its `$type` and nothing else.
+      //
+      // INERT BY CONSTRUCTION, and listed in the write-back audit above: the
+      // control is `.disabled(true)` over a `.constant` binding, so a reader
+      // cannot edit it and there is no input to drop. The typeahead popup, the
+      // filtering and the six keystrokes are the RENDERER's affordance under
+      // the affordance→op rule, and making this live is renderer feature work
+      // (a real searchable picker), not a write-back gap.
+      //
+      // `allowFreeText` is SHOWN rather than enforced. §3.6.9 obligation 4 is
+      // explicit that no static surface can enforce membership and that a host
+      // MUST NOT claim it as if it could — a claim inert markup cannot keep is
+      // worse than an honest absence.
+      case .combobox(_, let value, let allowFreeText, _):
+        labelled(label + (allowFreeText ? " (free text)" : "")) {
+          TextField("", text: .constant(ctx.resolve(value))).disabled(true)
+        }
       case .textArea(_, let value, _):
         labelled(label) {
           TextField("", text: .constant(ctx.resolve(value)), axis: .vertical).disabled(true)
@@ -1193,9 +1442,14 @@
     case .fragmentRef(let k): return slotTrees(k.args)
     case .mount(let k): return slotTrees(k.inputs)
     // Leaf / non-child-bearing kinds.
+    // `Tree` belongs HERE and not above: its rows are `TreeItem` records, not
+    // `Node`s, so a tree carries no embedded node for the walk to recurse into
+    // however deep the hierarchy goes. That is also why its nesting is bounded
+    // on its own axis (§21.5) rather than by the node-depth counter.
     case .heading, .markdown, .metric, .badge, .sparkline, .callout, .progress, .skeleton,
-      .icon, .fact, .labelValueRow, .link, .image, .media, .list, .toast, .codeBlock, .math,
-      .drawing, .form, .filters, .button, .fileUpload, .select, .dataGrid, .chart, .map, .custom:
+      .icon, .fact, .labelValueRow, .link, .image, .media, .embed, .tree, .list, .toast,
+      .codeBlock, .math, .drawing, .form, .filters, .button, .fileUpload, .select, .dataGrid,
+      .chart, .map, .custom:
       return []
     }
   }

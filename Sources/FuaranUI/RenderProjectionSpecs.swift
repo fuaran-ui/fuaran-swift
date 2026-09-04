@@ -180,8 +180,46 @@ extension Decode {
     }
   }
 
+  /// §3.6.6 (Phase 1110) — one `TrackEntry`, the strictest record on the wire.
+  ///
+  /// FOUR required members and one omitted-at-`false` slot, and the strictness
+  /// is the contract rather than this host being fussy: a track with no
+  /// language is one nothing downstream can route, and an unlabelled track is
+  /// offered as its kind alone, so a reader choosing between a plain and a
+  /// verbose captions cut is shown two identical choices.
+  ///
+  /// **The path carries the array index** (`$.kind.tracks[0].srcLang`), which is
+  /// why this reader takes the already-indexed path from its caller rather than
+  /// composing one: a document with four tracks must name the one at fault.
+  ///
+  /// `default` goes through the ordinary strict `bool` reader, so the
+  /// stringified boolean is REFUSED rather than coerced. That is the position
+  /// `reject-media-track-default-nonbool` pins — one level further in than
+  /// `reject-media-autoplay-nonbool`, at exactly the place a host decoding array
+  /// ELEMENTS with a looser walker than its records gets it wrong. This host was
+  /// that host until this change: the whole slot was unmodelled, so both track
+  /// reject vectors decoded happily.
+  static func trackEntry(_ path: String, _ j: JSON) throws -> TrackEntry {
+    let f = try object(path, j)
+    return TrackEntry(
+      kind: try bareEnum("\(path).kind", try req(path, f, "kind"), "TrackKind"),
+      src: try reqBindingSlot(path, f, "src", .str),
+      srcLang: try reqString(path, f, "srcLang"),
+      label: try reqTextSource(path, f, "label"),
+      isDefault: try optBool(path, f, "default") ?? false)
+  }
+
   static func mediaSpec(_ path: String, _ j: JSON) throws -> MediaSpec {
     let f = try object(path, j)
+    // §3.6.6 — absent MEANS the empty list, exactly as `ImageSpec.srcSet` does,
+    // and AUTHORED ORDER is preserved: `map` over the parsed array, never a
+    // sort. The re-sort is the failure this slot is most likely to attract,
+    // because the neighbouring `srcSet` rule is its exact opposite.
+    var tracks: [TrackEntry] = []
+    if let v = f["tracks"] {
+      tracks = try array("\(path).tracks", v).enumerated()
+        .map { try trackEntry("\(path).tracks[\($0.0)]", $0.1) }
+    }
     return MediaSpec(
       kind: try mediaKind("\(path).kind", try req(path, f, "kind")),
       // REQUIRED — a transport is never decorative, so there is no default to
@@ -191,7 +229,93 @@ extension Decode {
       src: try reqBindingSlot(path, f, "src", .str),
       // Omitted at TRUE — the `Toast.dismissable` polarity.
       controls: try optBool(path, f, "controls") ?? true,
-      loop: try optBool(path, f, "loop") ?? false)
+      loop: try optBool(path, f, "loop") ?? false,
+      tracks: tracks,
+      // An ORDINARY optional: absent means the document offers no transcript,
+      // which is a different statement from offering an empty one.
+      transcript: try optTextSource(path, f, "transcript"))
+  }
+
+  // ── Embed (§3.6.8) ─────────────────────────────────────────────────────────
+
+  /// §3.6.8 (Phase 1111) — the sandboxed third-party embed.
+  ///
+  /// `EmbedPermission` is a BARE enum (§3.5), so an unrecognised token reports
+  /// at the ELEMENT's own path with no `$type` suffix —
+  /// `$.kind.permissions[0]`, which is what `reject-embed-unknown-permission`
+  /// pins against the HTML token `"allow-top-navigation"` an author reaches for
+  /// from memory.
+  ///
+  /// **A decoder MUST NOT silently drop an unrecognised permission.** That would
+  /// turn a document asking for something this vocabulary has no name for into a
+  /// document asking for LESS, which reads as success — the one failure mode a
+  /// default-deny list makes tempting. A non-string element is `WRONG_TYPE` at
+  /// the same path (`reject-embed-permission-nonstring`): a bare `true` is
+  /// refused rather than read as a present-and-enabled flag, since a host that
+  /// coerced it would have to invent WHICH permission it names.
+  static func embedSpec(_ path: String, _ j: JSON) throws -> EmbedSpec {
+    let f = try object(path, j)
+    var permissions: [EmbedPermission] = []
+    if let v = f["permissions"] {
+      permissions = try array("\(path).permissions", v).enumerated()
+        .map { try bareEnum("\(path).permissions[\($0.0)]", $0.1, "EmbedPermission") }
+    }
+    return EmbedSpec(
+      src: try reqBindingSlot(path, f, "src", .str),
+      // REQUIRED (`reject-embed-missing-title`, MISSING_FIELD at
+      // `$.kind.title`) — an invented title is a claim about somebody else's
+      // document.
+      title: try reqTextSource(path, f, "title"),
+      permissions: permissions,
+      // REUSES `ImageAspect`; a bare enum, so an unknown token reports at the
+      // field's own path with no `.$type` suffix.
+      aspectRatio: try f["aspectRatio"].map {
+        try bareEnum("\(path).aspectRatio", $0, "ImageAspect")
+      } ?? .natural)
+  }
+
+  // ── Tree (§3.6.12) ─────────────────────────────────────────────────────────
+
+  /// §3.6.12 / §21.5 (Phase 1120) — one `TreeItem`, and the format's first
+  /// self-referential recursion.
+  ///
+  /// The §21.5 item budget is entered HERE, before the shape check, so a
+  /// hierarchy past the bound is refused for being too deep rather than for
+  /// whatever the over-deep value happens to look like — the `enterNode`
+  /// ordering, applied to the axis that node counter structurally cannot see.
+  ///
+  /// `id` and `label` are required at every level, and the nested reject vector
+  /// exists because a host whose child walker is looser than its root walker
+  /// passes the two top-level ones. There is exactly one reader here and the
+  /// recursion goes through it, so that divergence is unavailable.
+  static func treeItem(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> TreeItem {
+    try walk.enterItem(path)
+    defer { walk.exitItem() }
+    let f = try object(path, j)
+    var children: [TreeItem] = []
+    if let v = f["children"] {
+      children = try array("\(path).children", v).enumerated()
+        .map { try treeItem("\(path).children[\($0.0)]", $0.1, walk) }
+    }
+    return TreeItem(
+      id: try reqString(path, f, "id"),
+      label: try reqTextSource(path, f, "label"),
+      icon: try optString(path, f, "icon"),
+      children: children)
+  }
+
+  static func treeSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> TreeSpec {
+    let f = try object(path, j)
+    let items = try array("\(path).items", try req(path, f, "items")).enumerated()
+      .map { try treeItem("\(path).items[\($0.0)]", $0.1, walk) }
+    return TreeSpec(
+      items: items,
+      // Both State slots are NAMES, never state. A host reads the value under
+      // the named key; nothing about the reader's current expansion or
+      // selection rides the wire.
+      expandedStateKey: try optString(path, f, "expandedStateKey"),
+      selectionStateKey: try optString(path, f, "selectionStateKey"),
+      onSelect: optClosure(f, "onSelect"))
   }
 
   static func listSpec(_ path: String, _ j: JSON) throws -> ListSpec {
@@ -450,6 +574,24 @@ extension Decode {
       return .choice(
         options: try reqBindingSlot(path, f, "options", .options),
         value: try valueOr(.stringOpt, ControlValueDefaults.choice), onChange: onChange)
+    // §3.6.9 (Phase 1113) — the searchable form of `Choice`, and its value
+    // contract is `Choice`'s BY THE SPECIFICATION rather than by convenience:
+    // `valueOr(.stringOpt, …)` is the same call one arm up, so a document
+    // migrating between the two changes its `$type` and nothing else.
+    case "Combobox":
+      return .combobox(
+        // The case's ONLY required member — a combobox with no option source is
+        // not a control. A `Query` binding here IS the async suggestion feed;
+        // the slot reader is the ordinary one and needs no async vocabulary.
+        options: try reqBindingSlot(path, f, "options", .options),
+        value: try valueOr(.stringOpt, ControlValueDefaults.choice),
+        // Omitted at `false`, and read through the STRICT bool reader:
+        // `reject-combobox-allowfreetext-nonbool` refuses a string rather than
+        // coercing it, because the slot decides whether off-list values are
+        // admitted and a truthiness rule would widen the field on `"no"` and
+        // `"false"` alike.
+        allowFreeText: try optBool(path, f, "allowFreeText") ?? false,
+        onChange: onChange)
     // 0.2.0 — the dual-thumb numeric range (absorbed the retired RangeFilter).
     // The canonical Static pair rides as the BARE `{min, max}` object (no
     // `$type`) — accept it before the generic binding dispatch.
@@ -516,8 +658,8 @@ extension Decode {
     case let o:
       throw unknownCase(
         path, o,
-        "Text | Number | Checkbox | Choice | Range | RangedNumber | SegmentedChoice | TextArea "
-          + "| Date | DateRange"
+        "Text | Number | Checkbox | Choice | Combobox | Range | RangedNumber | SegmentedChoice "
+          + "| TextArea | Date | DateRange"
       )
     }
   }
@@ -1226,6 +1368,8 @@ extension Decode {
     case "Link": return .link(try linkSpec(path, j))
     case "Image": return .image(try imageSpec(path, j))
     case "Media": return .media(try mediaSpec(path, j))
+    case "Embed": return .embed(try embedSpec(path, j))
+    case "Tree": return .tree(try treeSpec(path, j, walk))
     case "List": return .list(try listSpec(path, j))
     case "Toast": return .toast(try toastSpec(path, j))
     case "CodeBlock": return .codeBlock(try codeBlockSpec(path, j))
@@ -1437,6 +1581,16 @@ extension Decode {
       try f["style"].map { try semanticStyle("\(path).style", $0) } ?? .default
     let accessibilityV: Accessibility? =
       try f["accessibility"].map { try accessibility("\(path).accessibility", $0) }
-    return Node(id: id, kind: kind, state: state, style: style, accessibility: accessibilityV)
+    // §3.1 (Phase 1112) — the tooltip trait, on the ENVELOPE beside
+    // `accessibility` rather than inside any `kind`. A `TextSource`, so the
+    // bare-string shorthand and the `I18n` form both land, and a non-text value
+    // is `WRONG_TYPE` at `$.tooltip` (`reject-tooltip-nonstring`). Until this
+    // change the slot was an unknown key: rule 2 tolerated it, three node
+    // fixtures round-tripped with the hint silently on the floor, and the reject
+    // vector decoded — the quiet half of the same defect.
+    let tooltipV: TextSource? = try optTextSource(path, f, "tooltip")
+    return Node(
+      id: id, kind: kind, state: state, style: style, accessibility: accessibilityV,
+      tooltip: tooltipV)
   }
 }

@@ -319,8 +319,9 @@ Every one of the kinds has an arm; what differs is how much each arm paints.
 - **Real** — layout containers (including masonry), headings, markdown, math,
   code blocks, lists, metrics with the trend glyph and sentiment tint, badges,
   callouts, toasts, facts, label/value rows, icons, progress, skeletons, tabs,
-  steppers, disclosures, the vector drawing canvas, the **tree** with its
-  full row structure, and the data grid with its twelve cell kinds.
+  steppers, disclosures, the vector drawing canvas, the **sparkline** (lowered
+  through that same canvas — see below), the **tree** with its full row
+  structure, and the data grid with its twelve cell kinds.
 - **Rendered but not interactive** — a link is styled text with no gesture; a
   tree renders its whole hierarchy, its labels and its open/closed state, but the
   six key bindings are an interactive host's addition over that identical
@@ -334,7 +335,34 @@ Every one of the kinds has an arm; what differs is how much each arm paints.
   of its obligations, sandbox declaration included, but there is **no browsing
   context**. Pulling any of them in is not a decision a decoding surface makes
   for you.
-- **Descriptive only** — chart, map, sparkline, mount, fragment reference.
+- **Descriptive only** — chart, map, mount, fragment reference.
+
+### The sparkline is LOWERED, not placeholdered
+
+`Sparkline` carries a bare bound series and nothing else, so every host that
+draws one turns that series into geometry. This surface used to draw a fixed grey
+rectangle from an arm that **took no arguments** — the series was not merely
+unpainted but structurally unreachable, a slot that decoded, validated, rendered
+and did nothing.
+
+It now lowers to the wire's own `Drawing` and goes through the same canvas an
+authored `Drawing` uses. There is one picture-drawing path here and the sparkline
+is on it; no hand-written vector output survives.
+
+**The declining posture was legitimate and was rejected on its merits.** A host
+may keep its placeholder and pin it as a tested contract instead. This surface
+adopts because it already carries a full vector drawing arm — so the lowering
+costs a pure function and reuses a seam rather than adding a renderer — and
+because the geometry is a shared contract rather than a host's opinion: the
+canvas, the flat-series guard, the one-unit inset, the centring of a lone point
+and the half-up rounding to two decimals are all fixed by goldens every adopting
+host is certified against, so a divergence is a failing test rather than an
+argument. `SparklineLoweringTests` reproduces every one of them, and proves the
+comparison can go red rather than assuming it.
+
+A series with nothing to draw keeps a visible fallback. The lowering returns
+nothing for that case deliberately: the fallback is a host element rather than a
+shape, and an empty canvas would be a picture claiming to be one.
 
 ### Interaction, and the boundary it does not cross
 

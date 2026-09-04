@@ -123,7 +123,7 @@
     case .markdown(let k): return AnyView(Text(ctx.resolveText(k.text)).padding(2))
     case .metric(let k): return AnyView(RenderMetric(k: k, ctx: ctx))
     case .badge(let k): return AnyView(RenderBadge(k: k, ctx: ctx))
-    case .sparkline: return AnyView(RenderSparkline())
+    case .sparkline(let k): return AnyView(RenderSparkline(k: k, ctx: ctx))
     case .callout(let k): return AnyView(RenderCallout(k: k, ctx: ctx))
     case .progress(let k): return AnyView(RenderProgress(k: k, ctx: ctx))
     case .skeleton(let k): return AnyView(RenderSkeleton(rows: k.rows))
@@ -541,10 +541,26 @@
     }
   }
 
+  /// Phase 1099 — a real lowered drawing, not a placeholder.
+  ///
+  /// The arm resolves the series and hands it to `sparklineDrawing`, whose
+  /// output goes through the SAME `FuaranDrawing` canvas an authored `Drawing`
+  /// does. There is one picture-drawing path on this surface and the sparkline
+  /// is on it; no hand-written vector output survives here.
+  ///
+  /// A series with nothing to draw keeps a visible fallback — the lowering
+  /// returns `nil` for that case deliberately, because the fallback is a HOST
+  /// element rather than a `Shape` and an empty canvas would be a picture
+  /// claiming to be one. The em-dash is the reference tiers' own fallback mark.
   private struct RenderSparkline: View {
+    let k: SparklineSpec
+    let ctx: BindingContext
     var body: some View {
-      RoundedRectangle(cornerRadius: 2).fill(Color(red: 0.69, green: 0.75, blue: 0.77)).frame(
-        width: 80, height: 16)
+      if let drawing = sparklineDrawing(series: ctx.resolveNumbers(k.source)) {
+        FuaranDrawing(drawing, ctx).frame(width: 80, height: 24)
+      } else {
+        Text("—").font(.caption).foregroundStyle(.secondary)
+      }
     }
   }
 

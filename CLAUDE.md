@@ -44,6 +44,7 @@ fuaran-swift/
 │   ├── EmbedPresentation.swift   # the embed frame projection (§3.6.8 + the §19.1 egress class)
 │   ├── TreeProjection.swift      # the tree row projection (the eight §3.6.12 obligations)
 │   ├── TooltipProjection.swift   # the tooltip trait projection (§3.1)
+│   ├── SparklineLowering.swift   # the sparkline → Drawing lowering (the shared goldens)
 │   └── …                         # Accessibility / TrendSentiment / FuaranNode / Theme / Drawing*
 ├── Tests/FuaranUITests/
 │   ├── CorpusTests.swift         # corpus render-coverage harness (per-kind coverage report)
@@ -523,6 +524,22 @@ Three things are worth stating here anyway.
   VACUOUS here, because that slot is an id reference into a document this surface does not have — the
   accessibility projection drops it and reports it dropped, so there is nothing to merge with. Both are
   fields rather than omissions, so a reader can tell a decision from an oversight.
+
+## Sparkline lowering — the posture, and why it is not a placeholder
+
+`Sparkline` lowers to the wire's own `Drawing` and renders through the same canvas an authored
+`Drawing` uses (`Sources/FuaranUIRenderer/SparklineLowering.swift`). The full argument is in
+`docs/RENDER-PROJECTION.md` — it is a claim a consumer needs, not only a maintainer — and the short
+form is: the arm previously took NO arguments, so the series was structurally unreachable; this
+surface already carries a vector drawing arm, so lowering costs a pure function and reuses a seam;
+and the geometry is fixed by shared goldens rather than by this surface's opinion, so a divergence is
+a failing test rather than an argument.
+
+**Forward-coupling.** A change to the geometry, the chrome or the rounding is a change to a SHARED
+contract: it moves in the goldens and in every certified host, never here alone. The min/max fold is
+written out rather than delegated to a standard-library reduction because NaN ordering is a
+language's own choice and the sentinel vector pins the arithmetic; do not "simplify" it to
+`series.min()`.
 
 ## Cross-repo dependencies
 

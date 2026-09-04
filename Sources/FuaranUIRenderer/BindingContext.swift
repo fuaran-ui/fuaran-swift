@@ -112,6 +112,57 @@ public struct BindingContext: Sendable {
     return resolve(binding).trimmingCharacters(in: .whitespaces).lowercased() == "true"
   }
 
+  /// Resolve a numeric-sequence slot to the series it carries (Phase 1099).
+  ///
+  /// The other `resolve*` helpers go through the display string and parse back,
+  /// which is right for a scalar and wrong for a series: the string form joins
+  /// with `", "` and prints each element through `numberString`, so a round trip
+  /// through it would lose a non-finite element to the very formatting the
+  /// sparkline goldens exist to pin. This reads the typed payload instead, and
+  /// returns an EMPTY series where there is none — the caller's `nil` case is
+  /// "nothing to draw", which an empty series already says.
+  public func resolveNumbers(_ binding: Binding) -> [Double] {
+    switch binding {
+    case .staticValue(let v): return numbers(v)
+    case .state(let key, let defaultValue):
+      if let value = state[key] { return jsonNumbers(value) }
+      return numbers(defaultValue)
+    case .filter(_, let defaultValue), .selection(_, let defaultValue, _):
+      return defaultValue.map(numbers) ?? []
+    case .local(_, let initialFrom): return resolveNumbers(initialFrom)
+    case .format(_, _, let source): return resolveNumbers(source)
+    // A series this floor cannot resolve is an ABSENT series, not a zero-length
+    // reading of one: the host owns queries, compute and the clock, so answering
+    // anything else would be inventing data.
+    case .query, .computed, .now, .i18n, .transform, .invoke: return []
+    }
+  }
+
+  private func numbers(_ value: StaticValue) -> [Double] {
+    switch value {
+    case .floatSeq(let ns): return ns
+    case .ast(let j): return jsonNumbers(j)
+    case .options, .stringOpt, .stringList, .markers, .floatPair, .stringPair: return []
+    }
+  }
+
+  /// A raw JSON array read as a series, honouring §7's three sentinel spellings
+  /// EXACTLY — the same tokens the decoder's float reader admits, so a series
+  /// that arrived through a host state slot reads identically to one that
+  /// arrived through the typed wire slot.
+  private func jsonNumbers(_ value: JSON) -> [Double] {
+    guard case .array(let items) = value else { return [] }
+    return items.compactMap { item in
+      switch item {
+      case .number(let n): return n
+      case .string("NaN"): return Double.nan
+      case .string("Infinity"): return Double.infinity
+      case .string("-Infinity"): return -Double.infinity
+      default: return nil
+      }
+    }
+  }
+
   /// Flatten a typed `Static` payload slot to a display string. Exhaustive.
   func flatten(_ value: StaticValue) -> String {
     switch value {

@@ -1,0 +1,61 @@
+# Conformance residue — the named set of things this surface is KNOWN not to answer.
+#
+# WHAT THIS IS. A committed list of the failures that stand on a clean tree against
+# the current shared corpus. The gates read it and go red in BOTH directions:
+#
+#   * a failure NOT on this list is a REGRESSION      -> red, named;
+#   * a line on this list that now PASSES is STALE    -> red, named, delete it.
+#
+# WHY IT EXISTS. This surface's gates were red BY DESIGN, and a run everyone
+# expects to be red is a run nobody reads: a new regression lands inside an
+# already-failing job with nothing to distinguish it from the standing failures.
+# Naming the residue turns the expected red into a green with a stated cap, and
+# gives a genuinely new failure somewhere to show up.
+#
+# WHAT IT IS NOT. It is not an exemption, and the distinction is the whole point.
+# A DECLARED EXEMPTION (see `declaredExemptions` in RenderObligationTests.swift)
+# says this surface STRUCTURALLY cannot answer a claim — it emits no attribute bag,
+# no document, no network image loader — and is a permanent, reasoned answer. A
+# residue entry says the surface does not model the slots the claim is about YET.
+# That is unadopted work; it shrinks through adoption, never by reclassification.
+# Turning a residue line into an exemption would make the gate green over a
+# capability nobody has adopted, which is the one thing the mechanism prevents.
+#
+# HOW TO SHRINK IT. Adopt the vocabulary, register the checker or fix the decoder,
+# delete the line. There is no way to make this file grow without it showing in a
+# diff.
+
+# ── Render obligations owed and unanswered (WIRE_FORMAT.md §13) ──────────────
+#
+# Both follow from vocabulary this surface does not model: `FileUpload` silently
+# drops `capture`, `destination`, `dropTarget` and `acceptPaste`; `Modal.modality`
+# is accepted permissively where the corpus pins a refusal. Each is reported by the
+# gate as "unchecked with no checker registered", which is the honest answer — not
+# checked is not passed, and silence is never an answer.
+#
+# Verified against wire-format-fixtures/render-fidelity.json (19 declared
+# obligations), the 15 registered `checkers` and the 2 `declaredExemptions`:
+# 19 - 15 - 2 = these two. RENDER-PROJECTION.md states the same pair.
+[obligation] FileUpload/picker-always-present
+[obligation] Modal/aria-modal-only-when-blocking
+
+# ── Reject vectors this decoder does not yet refuse ─────────────────────────
+#
+# UNRECORDED. `docs/RENDER-PROJECTION.md` states that ten reject vectors name this
+# surface's residue, and enumerates the CAUSES — form-field kinds `Tokens`,
+# `Rating` and `Color` unmodelled; `WriteToClipboard` widened from a bare string to
+# a text source, so a bound payload is refused as WRONG_TYPE; `FileUpload` dropping
+# `capture` / `destination` / `dropTarget` / `acceptPaste`; `Modal.modality` and
+# `SemanticStyle.direction` accepted permissively; the four print-break controls
+# unmodelled — but it does not name the ten fixture IDs, and deriving them requires
+# RUNNING the decoder against the corpus.
+#
+# This section is therefore deliberately EMPTY rather than guessed at, and an empty
+# reject section is NOT a pass: `testEveryRejectFixtureIsRefused` behaves exactly as
+# it did before this file existed — every failing vector fails the test — and prints
+# the corrected `[reject]` lines, ready to paste here, so recording it is one run and
+# one copy on any machine with a Swift toolchain.
+#
+# The machine this landed from carries no Swift toolchain (constraint of the
+# dispatch), so writing IDs here would have committed an unverified artefact to a
+# gate whose entire purpose is that its contents are true.

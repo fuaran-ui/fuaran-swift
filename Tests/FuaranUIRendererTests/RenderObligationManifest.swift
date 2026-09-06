@@ -86,6 +86,68 @@ struct RenderFidelityManifest: Decodable {
 /// claim no checker covers must turn this suite red, and demonstrating that must
 /// never involve writing to the shared corpus, which is the oracle every sibling
 /// surface answers to.
+
+// ─── The committed residue set ────────────────────────────────────────────────
+
+/// The residue file's location, relative to the repository root.
+let residueFileName = "conformance-residue.txt"
+
+/// `<repo>/Tests/<target>/<this file>` -> `<repo>`. Derived from `#filePath` rather
+/// than the working directory, which a test runner does not fix.
+var residueRepoRoot: URL {
+  URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()  // the test target directory
+    .deletingLastPathComponent()  // Tests
+    .deletingLastPathComponent()  // fuaran-swift
+}
+
+/// The committed residue set for one section (`obligation`, `reject`).
+///
+/// The file is REQUIRED, and its absence is an error rather than an empty set. A
+/// missing list is not a list with nothing on it: it means the gate does not know
+/// what it is capping, and a gate that cannot say what it excludes must not report
+/// success — the same rule `requireCorpus()` already applies to a missing corpus.
+///
+/// `FUARAN_RESIDUE` overrides the location so the go-red property can be PROVEN
+/// against a perturbed scratch copy without editing the committed file. An override
+/// naming a non-file is an error and never a quiet fall-back: a fall-back would make
+/// the proof unfalsifiable, because a mistyped path produces the same run as an
+/// unperturbed one.
+func loadResidue(_ section: String, repoRoot: URL) throws -> Set<String> {
+  let url: URL
+  if let declared = ProcessInfo.processInfo.environment["FUARAN_RESIDUE"], !declared.isEmpty {
+    let candidate = URL(fileURLWithPath: declared)
+    guard FileManager.default.fileExists(atPath: candidate.path) else {
+      throw ResidueUnavailable(
+        message:
+          "FUARAN_RESIDUE names \(candidate.path), which is not a file. Refusing to fall back to the "
+          + "committed list: a silent fall-back would make an override-driven proof unfalsifiable.")
+    }
+    url = candidate
+  } else {
+    url = repoRoot.appendingPathComponent(residueFileName)
+    guard FileManager.default.fileExists(atPath: url.path) else {
+      throw ResidueUnavailable(
+        message:
+          "the committed residue set is not at \(url.path). It is REQUIRED: without it this gate "
+          + "cannot say what it is capping, and a gate that cannot say what it excludes must not "
+          + "report success.")
+    }
+  }
+  let text = try String(contentsOf: url, encoding: .utf8)
+  let prefix = "[\(section)]"
+  return Set(
+    text.split(separator: "\n", omittingEmptySubsequences: false)
+      .map { $0.trimmingCharacters(in: .whitespaces) }
+      .filter { $0.hasPrefix(prefix) }
+      .map { String($0.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces) }
+      .filter { !$0.isEmpty })
+}
+
+/// Raised when the residue set cannot be read. Distinct from a test failure: the
+/// gate did not run, rather than ran and disagreed.
+struct ResidueUnavailable: Error { let message: String }
+
 enum RenderFidelityArtefact {
   static var url: URL {
     if let override = ProcessInfo.processInfo.environment["FUARAN_RENDER_FIDELITY"],

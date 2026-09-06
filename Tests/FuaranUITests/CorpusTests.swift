@@ -16,6 +16,68 @@ import XCTest
 /// `XCTSkip`, which is what a genuinely standalone clone gets.
 struct CorpusMissingOnCrossHostCheckout: Error {}
 
+// ─── The committed residue set ────────────────────────────────────────────────
+
+/// The residue file's location, relative to the repository root.
+let residueFileName = "conformance-residue.txt"
+
+/// `<repo>/Tests/<target>/<this file>` -> `<repo>`. Derived from `#filePath` rather
+/// than the working directory, which a test runner does not fix.
+var residueRepoRoot: URL {
+  URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()  // the test target directory
+    .deletingLastPathComponent()  // Tests
+    .deletingLastPathComponent()  // fuaran-swift
+}
+
+/// The committed residue set for one section (`obligation`, `reject`).
+///
+/// The file is REQUIRED, and its absence is an error rather than an empty set. A
+/// missing list is not a list with nothing on it: it means the gate does not know
+/// what it is capping, and a gate that cannot say what it excludes must not report
+/// success — the same rule `requireCorpus()` already applies to a missing corpus.
+///
+/// `FUARAN_RESIDUE` overrides the location so the go-red property can be PROVEN
+/// against a perturbed scratch copy without editing the committed file. An override
+/// naming a non-file is an error and never a quiet fall-back: a fall-back would make
+/// the proof unfalsifiable, because a mistyped path produces the same run as an
+/// unperturbed one.
+func loadResidue(_ section: String, repoRoot: URL) throws -> Set<String> {
+  let url: URL
+  if let declared = ProcessInfo.processInfo.environment["FUARAN_RESIDUE"], !declared.isEmpty {
+    let candidate = URL(fileURLWithPath: declared)
+    guard FileManager.default.fileExists(atPath: candidate.path) else {
+      throw ResidueUnavailable(
+        message:
+          "FUARAN_RESIDUE names \(candidate.path), which is not a file. Refusing to fall back to the "
+          + "committed list: a silent fall-back would make an override-driven proof unfalsifiable.")
+    }
+    url = candidate
+  } else {
+    url = repoRoot.appendingPathComponent(residueFileName)
+    guard FileManager.default.fileExists(atPath: url.path) else {
+      throw ResidueUnavailable(
+        message:
+          "the committed residue set is not at \(url.path). It is REQUIRED: without it this gate "
+          + "cannot say what it is capping, and a gate that cannot say what it excludes must not "
+          + "report success.")
+    }
+  }
+  let text = try String(contentsOf: url, encoding: .utf8)
+  let prefix = "[\(section)]"
+  return Set(
+    text.split(separator: "\n", omittingEmptySubsequences: false)
+      .map { $0.trimmingCharacters(in: .whitespaces) }
+      .filter { $0.hasPrefix(prefix) }
+      .map { String($0.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces) }
+      .filter { !$0.isEmpty })
+}
+
+/// Raised when the residue set cannot be read. Distinct from a test failure: the
+/// gate did not run, rather than ran and disagreed.
+struct ResidueUnavailable: Error { let message: String }
+
+
 final class CorpusTests: XCTestCase {
   /// Locate the shared corpus relative to this source file:
   /// `<repo>/Tests/FuaranUITests/CorpusTests.swift` → `<repo>/../wire-format-fixtures`.
@@ -267,11 +329,53 @@ final class CorpusTests: XCTestCase {
       }
     }
 
-    XCTAssertTrue(
-      failures.isEmpty,
-      "\(failures.count) of \(rejects.count) reject fixtures failed:\n" + failures.joined(separator: "\n")
+    // The failures, measured against the COMMITTED residue set rather than against
+    // zero.
+    //
+    // This leg was red by design: the surface does not model several form-field
+    // kinds, a widened `WriteToClipboard` payload, four `FileUpload` slots,
+    // `Modal.modality`, `SemanticStyle.direction` or the print-break controls, so a
+    // known set of reject vectors is accepted rather than refused. A gate everyone
+    // expects to be red is a gate nobody reads, and a NEW regression landing beside
+    // the standing ones is indistinguishable from them.
+    //
+    // So: a failure the residue does not name is a REGRESSION, and a residue entry
+    // that now passes is a STALE cap that must be deleted. Both are red. When the
+    // `[reject]` section is empty this behaves exactly as it did before — every
+    // failing vector fails the test — and prints the lines to record, which is how
+    // the set gets written by the first run on a machine with a toolchain.
+    let failedIds = Set(failures.map { (line: String) -> String in
+      String(line.prefix(while: { (c: Character) in c != ":" }))
+    })
+    let residue = try loadResidue("reject", repoRoot: residueRepoRoot)
+
+    let regressions = failedIds.subtracting(residue).sorted()
+    let stale = residue.subtracting(failedIds).sorted()
+
+    if !regressions.isEmpty {
+      print("RECORD THESE IN \(residueFileName) IF THEY ARE KNOWN, UNADOPTED WORK:")
+      for id in regressions { print("[reject] \(id)") }
+    }
+
+    XCTAssertEqual(
+      regressions, [],
+      "\(regressions.count) reject fixture(s) failed that \(residueFileName) does not name. "
+        + "Fix the decoder, or — if this is known, unadopted work — record them there (the exact "
+        + "lines are printed above). Do NOT declare them exempt: an exemption says this surface "
+        + "structurally cannot answer, which is not what an unmodelled slot is.\n"
+        + failures.filter { f in regressions.contains { f.hasPrefix($0 + ":") } }
+          .joined(separator: "\n")
     )
-    print("CORPUS REJECT LEG: \(rejects.count) fixtures refused with the canonical code + path")
+    XCTAssertEqual(
+      stale, [],
+      "\(stale.count) entry(ies) in \(residueFileName) name reject fixtures this surface now "
+        + "refuses correctly: delete those lines. A cap that no longer caps anything reads as "
+        + "measured and is a blindfold."
+    )
+
+    print(
+      "CORPUS REJECT LEG: \(rejects.count) fixtures checked; "
+        + "\(failedIds.count) failing, all named in \(residueFileName)")
   }
 
   /// The SANITIZATION family (`WIRE_FORMAT.md` §19 + §22) — semantic invariants.

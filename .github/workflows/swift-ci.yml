@@ -31,6 +31,11 @@ on:
       - "Sources/**"
       - "Tests/**"
       - "Package.swift"
+      # The committed residue set IS gate input: editing it changes what the corpus
+      # and obligation gates permit, so a change to it must re-run them. Without this
+      # entry a residue edit is invisible to CI, which is the same class of defect as
+      # a gate that never triggers.
+      - "conformance-residue.txt"
       - ".github/workflows/swift-ci.yml"
   pull_request:
     branches: [main]
@@ -38,6 +43,11 @@ on:
       - "Sources/**"
       - "Tests/**"
       - "Package.swift"
+      # The committed residue set IS gate input: editing it changes what the corpus
+      # and obligation gates permit, so a change to it must re-run them. Without this
+      # entry a residue edit is invisible to CI, which is the same class of defect as
+      # a gate that never triggers.
+      - "conformance-residue.txt"
       - ".github/workflows/swift-ci.yml"
   workflow_dispatch:
 
@@ -100,6 +110,46 @@ jobs:
         # runs here once it ships. SwiftUI snapshot tests render headlessly via
         # ImageRenderer (macOS 13+). For an iOS-simulator render destination, see the
         # optional xcodebuild leg documented below.
+
+      # The go-red proof for the residue comparison. `conformance-residue.txt` names
+      # what these gates permit; the gates are red for a CHANGE to that set in either
+      # direction, so both directions are exercised against perturbed SCRATCH copies —
+      # the committed file is never edited, and the verdict of the real run above
+      # stands.
+      #
+      # Without this the residue mechanism could be silently inert and the job would
+      # stay green: exactly the class this change is hardening against.
+      - name: Residue gate go-red proof (both directions)
+        run: |
+          set -uo pipefail
+          scratch="$RUNNER_TEMP/residue"
+          mkdir -p "$scratch"
+
+          # 1. WITHHELD: strip every entry. An owed obligation the residue does not
+          #    name must read as a regression.
+          grep -v '^\[obligation\]' conformance-residue.txt > "$scratch/withheld.txt"
+          if FUARAN_RESIDUE="$scratch/withheld.txt" swift test --filter RenderObligationTests; then
+            echo "::error::an emptied residue set did NOT red the obligation gate — the comparison is inert"
+            exit 1
+          fi
+          echo "go-red 1 OK: an unnamed owed obligation reds the gate."
+
+          # 2. STALE: an entry nothing owes must read as a stale cap.
+          cp conformance-residue.txt "$scratch/stale.txt"
+          echo '[obligation] ZZNoSuchKind/no-such-claim' >> "$scratch/stale.txt"
+          if FUARAN_RESIDUE="$scratch/stale.txt" swift test --filter RenderObligationTests; then
+            echo "::error::a residue entry that cannot be owed did NOT read as stale"
+            exit 1
+          fi
+          echo "go-red 2 OK: a stale residue entry reds the gate."
+
+          # 3. ABSENT: a residue file that is not there must FAIL, not read as empty.
+          #    A gate that cannot say what it excludes must not report success.
+          if FUARAN_RESIDUE="$scratch/definitely-not-a-file" swift test --filter RenderObligationTests; then
+            echo "::error::a missing residue file did NOT fail — an absent list is reading as an empty one"
+            exit 1
+          fi
+          echo "go-red 3 OK: an unreadable residue set fails rather than defaulting to empty."
 
   # ── Optional iOS-simulator render leg (documentation) ──────────────────────────
   # `swift test` above exercises SwiftUI on the macOS host, which covers macOS-target

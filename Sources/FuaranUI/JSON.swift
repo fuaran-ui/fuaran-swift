@@ -138,6 +138,17 @@ private struct JSONParser {
       let key = try parseString()
       skipWhitespace()
       try expect(":")
+      // WIRE_FORMAT.md §20.2 row 1 — a repeated member is INVALID_JSON, not a
+      // last-wins overwrite. It is one of the two rows that change what a
+      // document MEANS rather than whether it is accepted: the dictionary
+      // subscript kept the LAST occurrence here where the reference host kept
+      // the FIRST, so a vetting host and a rendering host read different trees
+      // from identical bytes with no error raised anywhere.
+      if out[key] != nil {
+        throw err(
+          "the object member '\(key)' appears more than once (WIRE_FORMAT.md §20.2 row 1): "
+            + "hosts disagreed on which occurrence wins, so the same bytes meant different trees")
+      }
       out[key] = try parseValue()
       if out.count > WireLimits.maxArrayLength {
         throw limit(
@@ -233,20 +244,49 @@ private struct JSONParser {
     throw err("unterminated string")
   }
 
+  /// Resolve one `\uXXXX` escape (WIRE_FORMAT.md §20.2 row 6).
+  ///
+  /// A high half must be followed immediately by a LOW half, and the second
+  /// clause is the one that was missing: this parser required only that the next
+  /// two scalars were `\u`, then combined whatever quad followed. So
+  /// `\uD83DA` produced a scalar the author never wrote — U+1F441 from an
+  /// emoji lead and a capital A — with no error anywhere. That is the silent
+  /// half of row 6, and it is the reason the row is enforced on the escape TEXT:
+  /// once a string is assembled, a pair and two halves that merely co-occur are
+  /// indistinguishable.
+  ///
+  /// A LONE LOW half needs no clause of its own here: `Unicode.Scalar(0xDC00)`
+  /// is `nil`, because a surrogate is not a Unicode scalar value, so it already
+  /// falls to the refusal below. That is recorded rather than left implicit,
+  /// since it is the kind of coverage that disappears in a later refactor.
   private mutating func parseUnicodeEscape() throws -> Unicode.Scalar {
     let hi = try readHex4()
-    // Surrogate pair.
     if hi >= 0xD800, hi <= 0xDBFF {
       guard i + 1 < scalars.count, scalars[i] == "\\", scalars[i + 1] == "u" else {
-        throw err("expected low surrogate")
+        throw err(
+          "an unpaired HIGH surrogate escape (WIRE_FORMAT.md §20.2 row 6): a "
+            + "\\uD800-\\uDBFF escape must be followed immediately by a \\uDC00-\\uDFFF escape")
       }
       i += 2
       let lo = try readHex4()
+      guard lo >= 0xDC00, lo <= 0xDFFF else {
+        throw err(
+          "an unpaired HIGH surrogate escape (WIRE_FORMAT.md §20.2 row 6): a "
+            + "\\uD800-\\uDBFF escape must be followed by a LOW half (\\uDC00-\\uDFFF), "
+            + "not by any \\u escape")
+      }
       let combined = 0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00)
       guard let s = Unicode.Scalar(combined) else { throw err("invalid surrogate pair") }
       return s
     }
-    guard let s = Unicode.Scalar(hi) else { throw err("invalid unicode escape") }
+    guard let s = Unicode.Scalar(hi) else {
+      if hi >= 0xDC00, hi <= 0xDFFF {
+        throw err(
+          "an unpaired LOW surrogate escape (WIRE_FORMAT.md §20.2 row 6): a "
+            + "\\uDC00-\\uDFFF escape must be preceded immediately by a \\uD800-\\uDBFF escape")
+      }
+      throw err("invalid unicode escape")
+    }
     return s
   }
 

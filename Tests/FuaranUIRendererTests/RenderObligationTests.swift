@@ -719,16 +719,75 @@ final class RenderObligationTests: XCTestCase {
       print("  render obligation not asserted: \(describeObligationReport(line))")
     }
 
-    let undeclared =
-      unmet
-      .filter { declaredExemptions["\($0.kind)/\($0.claimId)"] == nil }
-      .map { "\($0.kind)/\($0.claimId) [\($0.section)]" }
-      .sorted()
+    // The claims this surface neither asserts nor declares exempt: owed, unanswered,
+    // and therefore RED — unless they are the named residue in the committed
+    // `conformance-residue.txt`, in which case the gate is red for a CHANGE to that
+    // set instead, in either direction.
+    //
+    // Why residue is a THIRD category and not a third exemption: an exemption says
+    // this surface STRUCTURALLY cannot answer a claim — it holds no attribute bag,
+    // emits no document — and is a permanent reasoned answer. These two are
+    // unanswered because the surface does not model the SLOTS the claims are about,
+    // which is unadopted work. Exempting them would turn the gate green over a
+    // capability nobody has adopted, and that is the one thing this mechanism exists
+    // to prevent. `docs/RENDER-PROJECTION.md` already says so in words; this makes
+    // it a check.
+    //
+    // What the residue buys is the second direction. Before it, this gate was red by
+    // design, and a run everyone expects to be red is a run nobody reads.
+    let owed = Dictionary(
+      uniqueKeysWithValues:
+        unmet
+        .filter { declaredExemptions["\($0.kind)/\($0.claimId)"] == nil }
+        .map { ("\($0.kind)/\($0.claimId)", $0) })
+    let residue = try loadResidue("obligation", repoRoot: residueRepoRoot)
+
+    let regressions = Set(owed.keys).subtracting(residue).sorted()
+      .map { "\($0) [\(owed[$0]!.section)]" }
+    let stale = residue.subtracting(owed.keys).sorted()
 
     XCTAssertEqual(
-      undeclared, [],
-      "a render obligation this surface owes has no checker: assert it, or add a declared exemption saying why this surface cannot"
+      regressions, [],
+      "a render obligation this surface owes has no checker and is not named in "
+        + "\(residueFileName): assert it, add a declared exemption saying why this surface cannot, "
+        + "or — if it is genuinely unadopted work — record it there"
     )
+    XCTAssertEqual(
+      stale, [],
+      "\(residueFileName) names \(stale.count) obligation(s) as unanswered that this surface now "
+        + "answers: delete those lines. A cap that no longer caps anything reads as measured and is "
+        + "a blindfold."
+    )
+  }
+
+  // ── The residue comparison's own go-red proof ──────────────────────────────
+
+  func testTheResidueComparisonGoesRedInBothDirections() throws {
+    // Without this, a bug that made the owed set come back empty would leave the
+    // gate above green forever with an unread residue file beside it — the
+    // completeness check that cannot fail, which is the defect this file is about.
+    let manifest = try requireManifest()
+    let report = reportObligations(manifest: manifest, statusOf: statusOf)
+    let owed = Set(
+      unassertedObligations(report)
+        .filter { declaredExemptions["\($0.kind)/\($0.claimId)"] == nil }
+        .map { "\($0.kind)/\($0.claimId)" })
+    let residue = try loadResidue("obligation", repoRoot: residueRepoRoot)
+
+    if owed.isEmpty && residue.isEmpty {
+      // Legitimate once adoption completes; say so rather than passing silently.
+      print("  residue: EMPTY on both sides — every declared obligation is asserted or exempt.")
+      return
+    }
+
+    if let withheld = owed.sorted().first {
+      XCTAssertFalse(
+        owed.subtracting(residue.subtracting([withheld])).isEmpty,
+        "withholding \(withheld) from the residue set did not read as a regression")
+    }
+    XCTAssertFalse(
+      residue.union(["ZZNoSuchKind/no-such-claim"]).subtracting(owed).isEmpty,
+      "a residue entry that cannot possibly be owed did not read as stale")
   }
 
   // ── The permanent negative probe ───────────────────────────────────────────

@@ -146,6 +146,11 @@ the build is portable to a correctly-configured Swift-on-Windows toolchain.
 - **C-ABI session binding** — the `FuaranSession` Swift actor over the Rust reference core's native
   staticlib; session tests drive seed → apply-op → re-project end-to-end when the core is linked.
 
+- **SwiftUI renderer floor + interaction round-trip + server-driven driver** — the exhaustive
+  `FuaranNode` dispatch spine, the tone bridge, the `FuaranHost` interaction loop, and the
+  transport-agnostic driver (SwiftUI legs compile on Apple platforms; the pure layers build
+  everywhere).
+
 ## Consuming a live session
 
 The staticlib is the only route today, and it is a build-it-yourself one: check out the Rust
@@ -160,11 +165,6 @@ rather than left green: a passing check for an absent capability is worse than n
 is what everything downstream cites. When the packaging is written, the switch, the CI job (failing
 unless an artefact is produced) and a `binaryTarget` land together — that being the only combination
 in which an SPM consumer can actually reach `FuaranSession`.
-- **SwiftUI renderer floor + interaction round-trip + server-driven driver** — the exhaustive
-  `FuaranNode` dispatch spine, the tone bridge, the `FuaranHost` interaction loop, and the
-  transport-agnostic driver (SwiftUI legs compile on Apple platforms; the pure layers build
-  everywhere).
-
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE).

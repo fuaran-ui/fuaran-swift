@@ -10,9 +10,9 @@
 // pointer concurrently, and the pointer never escapes the actor.
 //
 // This whole file compiles only when the native core is linked (the
-// FUARAN_CORE_AVAILABLE flag, set by Package.swift when the Rust staticlib /
-// XCFramework leg is present). On a machine without it, the file is empty and
-// the pure-Swift render projection (Phase 538) stands alone.
+// FUARAN_CORE_AVAILABLE flag, set by Package.swift when the Rust staticlib is
+// present beside this repository). On a machine without it, the file is empty
+// and the pure-Swift render projection (Phase 538) stands alone.
 
 #if FUARAN_CORE_AVAILABLE
 

@@ -6,21 +6,22 @@
 # Apple environment those phases need — GitHub-hosted macOS runners run on genuine Apple
 # hardware (license-compliant), so SwiftUI builds and renders here.
 #
-# It mirrors run.ps1's macOS happy path (swift build + swift test), plus two further legs:
-#   • swift-core   — links the fuaran-rs reference-core staticlib so the C-ABI SessionTests
-#                    run instead of skipping (Phase 539).
-#   • xcframework  — assembles FuaranCore.xcframework from the Apple build legs
-#                    (mirrors `run.ps1 -Package`; macOS + xcodebuild only; on demand
-#                    via workflow_dispatch).
+# It mirrors run.ps1's happy path (C-ABI header check + swift build + swift test), plus one
+# further leg:
+#   • swift-core   — checks out the fuaran-rs reference core beside this repository, byte-compares
+#                    the C header copy against it, and links the core staticlib so the C-ABI
+#                    SessionTests run instead of skipping (Phase 539).
+#
+# There is no xcframework job. One existed and reported success while assembling nothing
+# (see the README's "Consuming a live session"); it was removed rather than left green.
 #
 # COST NOTE: GitHub-hosted macOS runners bill at ~10x the Linux rate. Path filters keep
-# this off unrelated changes; the heaviest leg (xcframework) runs only on demand via
-# workflow_dispatch.
+# this off unrelated changes.
 #
 # NO SECRETS REQUIRED: every sibling this workflow checks out (fuaran-ui/fuaran-rs,
 # fuaran-ui/fuaran-ui-specification) is public, so all checkouts are tokenless. The
 # FUARAN_RS_PAT secret and its presence-gate job are retired (2026-09-01) — fuaran-rs
-# is public, so the core/xcframework legs no longer skip when a secret is absent.
+# is public, so the core leg no longer skips when a secret is absent.
 
 name: swift-ci
 

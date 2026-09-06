@@ -242,9 +242,27 @@ private struct JSONParser {
       }
       i += 2
       let lo = try readHex4()
+      // The LOW half must be IN the low-surrogate range, and checking it is not
+      // pedantry about a spelling: the arithmetic below subtracts 0xDC00
+      // unconditionally, so any other value shifts the result by an arbitrary amount.
+      // A high surrogate followed by an escape for U+0041 combined to U+0F83D — a
+      // Tibetan character bearing no relation to either half — and the
+      // `Unicode.Scalar` guard below said nothing about it, because the sum happened
+      // to land on a scalar that exists. A malformed pair became a plausible-looking
+      // wrong character, silently, in decoded document text.
+      guard lo >= 0xDC00, lo <= 0xDFFF else {
+        throw err("expected a low surrogate (DC00-DFFF) after a high surrogate")
+      }
       let combined = 0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00)
       guard let s = Unicode.Scalar(combined) else { throw err("invalid surrogate pair") }
       return s
+    }
+    // An UNPAIRED low surrogate is refused by name. It is not a valid scalar on its
+    // own, so the guard below already returns nil for it — but that reports "invalid
+    // unicode escape", which sends an author to inspect their hex digits rather than
+    // to notice the missing high half.
+    if hi >= 0xDC00, hi <= 0xDFFF {
+      throw err("a low surrogate (DC00-DFFF) must follow a high surrogate (D800-DBFF)")
     }
     guard let s = Unicode.Scalar(hi) else { throw err("invalid unicode escape") }
     return s

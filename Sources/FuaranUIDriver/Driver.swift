@@ -11,7 +11,8 @@
 //
 // No wire-JSON handling happens outside the session boundary: the driver only
 // ever hands raw op JSON to `FuaranTreeSession.applyOp` and decodes the JSON the
-// session hands back with `RenderProjection.decodeNode`. The driver is transport-
+// session hands back with `RenderProjection.decodeNode` — from
+// `projectResolved()`, the read the render path uses. The driver is transport-
 // and session-agnostic (both are seams), so the same loop runs over the live
 // Rust session in production and over an in-memory fixture + fake session under
 // test.
@@ -56,7 +57,8 @@ public final class ServerDrivenDriver {
     do {
       let initial = try await transport.fetchInitialTree()
       session = try sessionFactory(initial)
-      lastGood = try RenderProjection.decodeNode(await session.treeJSON())
+      // projectResolved(), not treeJSON() — see the note in the op loop below.
+      lastGood = try RenderProjection.decodeNode(await session.projectResolved())
     } catch {
       let fatal = DriverState.fatal(error)
       onState(fatal)
@@ -78,7 +80,18 @@ public final class ServerDrivenDriver {
     for op in ops {
       do {
         try await session.applyOp(op)
-        lastGood = try RenderProjection.decodeNode(await session.treeJSON())
+        // The RESOLVED projection, not `treeJSON()`.
+        //
+        // `treeJSON()` is the round-trip EXIT point: every scalar `Binding.Transform`
+        // arrives there unevaluated, and this surface is decode-only — it cannot
+        // evaluate one. So a metric or a heading driven by a computed value rendered
+        // as the empty string on the server-driven path, while the interaction host
+        // (`Interaction.swift`, which already read the resolved projection) rendered
+        // it correctly. Two paths over one session disagreeing about what the tree
+        // says is worse than either being wrong on its own; `TreeSession.swift`
+        // documents `projectResolved` as "the read the render path uses", and this
+        // is a render path.
+        lastGood = try RenderProjection.decodeNode(await session.projectResolved())
         last = .rendered(lastGood)
       } catch {
         // Survive the reject: keep the last-good tree, surface the typed error.

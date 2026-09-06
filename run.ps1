@@ -5,21 +5,27 @@
 # Stage-0 entry point for fuaran-swift — the native Swift surface over the Rust
 # reference core of the Fuaran UI wire format.
 #
-#   pwsh ./run.ps1                 # swift build + swift test (happy path)
+#   pwsh ./run.ps1                 # C-ABI header check + swift build + swift test
 #   pwsh ./run.ps1 -SkipBuild      # switches: -SkipBuild / -SkipTests
-#   pwsh ./run.ps1 -Package        # opt-in: assemble the FuaranCore.xcframework
-#                                  #   (macOS + xcodebuild only — skips cleanly elsewhere)
+#
+# `-Package` is GONE, deliberately. It advertised assembling a
+# FuaranCore.xcframework and never did: off macOS it skipped, and ON macOS it
+# printed "packaging implementation is macOS-side" and produced nothing — while a
+# CI job invoked it and reported success. A switch that reports success for work
+# it does not do is worse than an absent one; it is the mechanism by which
+# everything downstream came to believe an xcframework exists. See the README's
+# "Consuming this package" section for what IS true today.
 #
 # The macOS toolchain is the reference target. On a machine with no Swift
-# toolchain (or an incomplete Windows toolchain), the script SKIPS cleanly so
-# the workspace sweep stays green — mirroring how the sibling Rust host skips its
-# Apple-only build legs with a named message.
+# toolchain (or an incomplete Windows toolchain), the build/test legs SKIP
+# cleanly so the workspace sweep stays green — mirroring how the sibling Rust
+# host skips its Apple-only legs with a named message. The header check below
+# runs REGARDLESS, because it needs no toolchain at all.
 
 [CmdletBinding()]
 param(
     [switch]$SkipBuild,
-    [switch]$SkipTests,
-    [switch]$Package
+    [switch]$SkipTests
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,6 +33,48 @@ Set-Location $PSScriptRoot
 
 function Write-Skip($msg) { Write-Host "SKIP: $msg" -ForegroundColor Yellow }
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
+
+# ── C-ABI header drift (the reference-stylesheet shape) ───────────────────────
+# `Sources/FuaranCore/include/fuaran.h` is a COPY. The reference lives in the Rust
+# core; this leg byte-compares them when the sibling checkout is present.
+#
+# It runs BEFORE the toolchain gate on purpose: it is a text comparison needing no
+# Swift, no MSVC linker and no Rust, so a box with none of them still answers the
+# one question it CAN answer instead of exiting 0 having checked nothing. The copy
+# was 56 lines behind the reference — missing an entire family of session verbs —
+# and every gate in this repository was green throughout, because nothing compared
+# them.
+#
+# NOT CHECKED rather than a quiet pass when the sibling is absent: a single-repo
+# checkout has no sibling, and a green line saying nothing about the header would
+# read to every later log reader as "the copy is current".
+$HeaderCopy = Join-Path $PSScriptRoot "Sources/FuaranCore/include/fuaran.h"
+$HeaderRef = Join-Path $PSScriptRoot "../fuaran-rs/include/fuaran.h"
+Write-Step "C-ABI header (fuaran.h) drift"
+if (-not (Test-Path $HeaderCopy)) {
+    throw "fuaran.h copy missing at $HeaderCopy — the FuaranCore module target cannot build without it."
+}
+elseif (-not (Test-Path $HeaderRef)) {
+    Write-Skip "no sibling core checkout at $HeaderRef — NOT CHECKED, the copy was not compared."
+}
+elseif ((Get-FileHash -Algorithm SHA256 $HeaderCopy).Hash -ne (Get-FileHash -Algorithm SHA256 $HeaderRef).Hash) {
+    throw @"
+fuaran.h has drifted from the reference.
+
+  copy:      $HeaderCopy
+  reference: $HeaderRef
+
+The copy is GENERATED — regenerate it rather than hand-editing either side:
+  Copy-Item '$HeaderRef' '$HeaderCopy'
+
+Then read the diff before committing. A declaration this module is missing is a
+verb Swift cannot call; one whose signature has changed is a link-time or run-time
+fault on a device, which is the failure this check exists to move to build time.
+"@
+}
+else {
+    Write-Host "  fuaran.h byte-identical to the reference." -ForegroundColor Green
+}
 
 # ── Toolchain presence ────────────────────────────────────────────────────────
 $swift = Get-Command swift -ErrorAction SilentlyContinue
@@ -100,18 +148,6 @@ if (-not $SkipTests) {
     Write-Step "swift test"
     & swift test
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-}
-
-# ── XCFramework packaging (opt-in; macOS + xcodebuild only) ────────────────────
-if ($Package) {
-    $xcodebuild = Get-Command xcodebuild -ErrorAction SilentlyContinue
-    if (-not $xcodebuild) {
-        Write-Skip "the FuaranCore.xcframework packaging leg is macOS + xcodebuild only; there is nothing to assemble on this platform. (See CLAUDE.md 'XCFramework packaging'.)"
-    }
-    else {
-        Write-Step "assembling FuaranCore.xcframework"
-        Write-Host "  (packaging implementation is macOS-side; see CLAUDE.md)" -ForegroundColor DarkGray
-    }
 }
 
 Write-Host "OK" -ForegroundColor Green

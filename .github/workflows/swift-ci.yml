@@ -6,21 +6,22 @@
 # Apple environment those phases need — GitHub-hosted macOS runners run on genuine Apple
 # hardware (license-compliant), so SwiftUI builds and renders here.
 #
-# It mirrors run.ps1's macOS happy path (swift build + swift test), plus two further legs:
-#   • swift-core   — links the fuaran-rs reference-core staticlib so the C-ABI SessionTests
-#                    run instead of skipping (Phase 539).
-#   • xcframework  — assembles FuaranCore.xcframework from the Apple build legs
-#                    (mirrors `run.ps1 -Package`; macOS + xcodebuild only; on demand
-#                    via workflow_dispatch).
+# It mirrors run.ps1's happy path (C-ABI header check + swift build + swift test), plus one
+# further leg:
+#   • swift-core   — checks out the fuaran-rs reference core beside this repository, byte-compares
+#                    the C header copy against it, and links the core staticlib so the C-ABI
+#                    SessionTests run instead of skipping (Phase 539).
+#
+# There is no xcframework job. One existed and reported success while assembling nothing
+# (see the README's "Consuming a live session"); it was removed rather than left green.
 #
 # COST NOTE: GitHub-hosted macOS runners bill at ~10x the Linux rate. Path filters keep
-# this off unrelated changes; the heaviest leg (xcframework) runs only on demand via
-# workflow_dispatch.
+# this off unrelated changes.
 #
 # NO SECRETS REQUIRED: every sibling this workflow checks out (fuaran-ui/fuaran-rs,
 # fuaran-ui/fuaran-ui-specification) is public, so all checkouts are tokenless. The
 # FUARAN_RS_PAT secret and its presence-gate job are retired (2026-09-01) — fuaran-rs
-# is public, so the core/xcframework legs no longer skip when a secret is absent.
+# is public, so the core leg no longer skips when a secret is absent.
 
 name: swift-ci
 
@@ -205,6 +206,24 @@ jobs:
           key: cargo-${{ runner.os }}-${{ hashFiles('fuaran-rs/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
 
+      # The C-ABI header this repository ships is a COPY of the one the reference core
+      # ships. This is the only job that has BOTH checked out, so it is the only place
+      # the copy can be compared — and until it was, the copy sat 56 lines behind the
+      # reference, missing an entire family of session verbs, with every gate green.
+      #
+      # Before the build, so a header change is reported as a header change rather than
+      # as whatever the compiler says about it three steps later.
+      - name: C-ABI header (fuaran.h) is byte-identical to the reference
+        run: |
+          if ! cmp -s fuaran-swift/Sources/FuaranCore/include/fuaran.h fuaran-rs/include/fuaran.h; then
+            echo "::error::fuaran.h has drifted from the reference core's header."
+            echo "The copy is GENERATED. Regenerate it and read the diff:"
+            echo "  cp fuaran-rs/include/fuaran.h fuaran-swift/Sources/FuaranCore/include/fuaran.h"
+            diff -u fuaran-swift/Sources/FuaranCore/include/fuaran.h fuaran-rs/include/fuaran.h || true
+            exit 1
+          fi
+          echo "fuaran.h byte-identical to the reference."
+
       - name: Build the Rust reference-core staticlib (host target)
         working-directory: fuaran-rs
         run: cargo build # → target/debug/libfuaran_rs.a (rustup is preinstalled on macOS runners)
@@ -219,35 +238,14 @@ jobs:
           swift build -v
           swift test -v
 
-  # ── FuaranCore.xcframework packaging (Phase 539 reference packaging) ────────────
-  # macOS + xcodebuild only; mirrors `run.ps1 -Package`. Heavier (builds the Apple
-  # targets), so run it on demand via workflow_dispatch.
-  xcframework:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: macos-15
-    steps:
-      - name: Checkout fuaran-swift
-        uses: actions/checkout@v4
-        with:
-          path: fuaran-swift
-
-      - name: Checkout fuaran-rs (sibling reference core)
-        uses: actions/checkout@v4
-        with:
-          repository: fuaran-ui/fuaran-rs
-          path: fuaran-rs
-
-      - name: Select Xcode
-        run: |
-          latest=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1 || true)
-          if [ -n "$latest" ]; then sudo xcode-select -s "$latest"; fi
-
-      - name: Add the Apple Rust targets
-        run: rustup target add aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim
-
-      - name: Assemble FuaranCore.xcframework
-        working-directory: fuaran-swift
-        # run.ps1 -Package builds the Apple staticlib legs and runs
-        # `xcodebuild -create-xcframework`; it skips cleanly if a leg is unavailable.
-        # PowerShell is preinstalled on GitHub-hosted macOS runners.
-        run: pwsh ./run.ps1 -Package
+  # ── There is no xcframework job, and that is the fix rather than an omission ─────
+  #
+  # A `workflow_dispatch` job called `xcframework` used to sit here running
+  # `pwsh ./run.ps1 -Package`. That switch assembled nothing — it printed a note
+  # saying the implementation was elsewhere — so the job reported success, uploaded
+  # no artefact, and was the evidence everything downstream cited for believing a
+  # FuaranCore.xcframework exists. A green job that produces nothing is worse than
+  # no job: it is a passing check for an absent capability.
+  #
+  # When the packaging is actually written, the job comes back with the property it
+  # never had: it FAILS unless an artefact is produced, and uploads it.

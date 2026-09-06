@@ -20,6 +20,13 @@ Add the package and depend on the `FuaranUI` product:
 // target dependency: .product(name: "FuaranUI", package: "fuaran-swift")
 ```
 
+**What that gets you, precisely.** `FuaranUI`'s pure-Swift half — the sealed tree model and the
+render-projection decoder — resolves for any consumer. **`FuaranSession` does not.** The C-ABI
+binding is wired only when `Package.swift` finds the Rust reference core's native staticlib beside
+the manifest (or at `FUARAN_RS_STATICLIB_DIR`), which holds on a side-by-side workspace checkout
+and does not for anyone consuming this package over SPM. There is no `binaryTarget` and no
+published artefact for one to name. See [Consuming a live session](#consuming-a-live-session).
+
 Decode a session's canonical tree JSON into the sealed model and `switch` over it —
 an unmodelled kind is a compile error:
 
@@ -57,12 +64,17 @@ Accessors exist for each (`media.sanitizedSrc`, `media.sanitizedPoster`, `entry.
 
 ```swift
 switch link.sanitizedHref {                       // NOT link.href
-case .allowed(let url):  open(URL(string: url)!)  // http / https / mailto / tel, or relative
+// `if let`, not `URL(string:)!` — the floor decides whether a DESTINATION is allowed,
+// not whether Foundation can parse it, and those are different questions: an interior
+// space passes the policy and returns nil here, so the force-unwrap this line used to
+// carry crashed the app on a link the floor had just approved.
+case .allowed(let str):  if let url = URL(string: str) { open(url) }  // http / https / mailto / tel, or relative
 case .rejected(_, let why): log("refused destination: \(why)")
 case .dynamic:                                    // the slot is a State / Query / Format binding
     // Resolve it however your app resolves bindings (read the session's
     // resolved projection), then apply the same floor to the result:
-    if let safe = FuaranUrlPolicy.sanitize(resolvedHref) { open(URL(string: safe)!) }
+    if let safe = FuaranUrlPolicy.sanitize(resolvedHref),
+       let url = URL(string: safe) { open(url) }
 }
 ```
 
@@ -132,13 +144,27 @@ the build is portable to a correctly-configured Swift-on-Windows toolchain.
   render-coverage harness: every node fixture (node-round-trip + lenient-accept) decodes into the
   sealed model, coverage reported per kind.
 - **C-ABI session binding** — the `FuaranSession` Swift actor over the Rust reference core's native
-  staticlib (or the `FuaranCore.xcframework` on Apple platforms); session tests drive
-  seed → apply-op → re-project end-to-end when the core is linked.
+  staticlib; session tests drive seed → apply-op → re-project end-to-end when the core is linked.
+
 - **SwiftUI renderer floor + interaction round-trip + server-driven driver** — the exhaustive
   `FuaranNode` dispatch spine, the tone bridge, the `FuaranHost` interaction loop, and the
   transport-agnostic driver (SwiftUI legs compile on Apple platforms; the pure layers build
   everywhere).
 
+## Consuming a live session
+
+The staticlib is the only route today, and it is a build-it-yourself one: check out the Rust
+reference core beside this repository, `cargo build` it, and `Package.swift` picks the library up
+from `../fuaran-rs/target/debug` (or `FUARAN_RS_STATICLIB_DIR`). Without it the package still builds
+and tests — the pure-Swift render projection is complete on its own, and the session tests skip.
+
+**There is no `FuaranCore.xcframework`, and this section is where that used to be claimed.** A
+`run.ps1 -Package` switch and a CI job of the same name both reported success while assembling
+nothing at all, so the artefact was cited in three places and existed in none. Both are removed
+rather than left green: a passing check for an absent capability is worse than no check, because it
+is what everything downstream cites. When the packaging is written, the switch, the CI job (failing
+unless an artefact is produced) and a `binaryTarget` land together — that being the only combination
+in which an SPM consumer can actually reach `FuaranSession`.
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE).

@@ -70,6 +70,40 @@ final class ServerDrivenDriverTests: XCTestCase {
     XCTAssertTrue(posted[0].contains("click"))
   }
 
+  /// The driver renders the RESOLVED projection, not the round-trip tree.
+  ///
+  /// The fixture is built so this can only pass for the right reason: the session's two
+  /// reads return DIFFERENT trees. `treeJSON()` carries the tree as authored — a
+  /// `Bound(Transform)` label, which this decode-only surface cannot evaluate and renders
+  /// as the empty string. `projectResolved()` carries what the Rust core's resolved
+  /// projection hands back: the same tree with that scalar `Transform` folded to a literal.
+  ///
+  /// So a driver reading `treeJSON()` sees `""` here and one reading `projectResolved()`
+  /// sees `"2"`. Before the fix this fails on the empty string — which is what the
+  /// server-driven path showed users for every computed value, while the interaction host,
+  /// already reading the resolved projection, showed them correctly.
+  func testTheDriverRendersTheResolvedProjectionNotTheRoundTripTree() async {
+    let unresolved = #"""
+      {"id":"root","kind":{"$type":"Markdown","text":{"$type":"Bound","binding":{"$type":"Transform","pipeline":[],"source":{"columns":{"id":{"values":["A","B"]}},"schema":[{"name":"id","type":"string"}]}}}}}
+      """#
+    let resolved = md("root", "2")
+    let transport = FixtureTransport(tree: unresolved, ops: [])
+    let driver = ServerDrivenDriver(transport: transport) { initial in
+      FixtureSession(initial, resolvedTreeJSON: resolved)
+    }
+
+    var states: [DriverState] = []
+    _ = await driver.run { states.append($0) }
+
+    guard let first = states.first, case .rendered(let seeded) = first else {
+      return XCTFail("the seed must project, got \(String(describing: states.first))")
+    }
+    XCTAssertEqual(
+      text(seeded), "2",
+      "the driver must project from projectResolved(): reading treeJSON() renders the "
+        + "unevaluated Transform as an empty string")
+  }
+
   func testTransportFailureSurfacesAsFatal() async {
     let driver = ServerDrivenDriver(transport: FailingTransport()) { initial in
       FixtureSession(initial)
@@ -94,10 +128,26 @@ private struct FixtureError: Error { let message: String }
 /// op-agnostic, so the op semantics are the session's concern.
 actor FixtureSession: FuaranTreeSession {
   private var current: String
-  init(_ initial: String) { self.current = initial }
+
+  /// What `projectResolved()` hands back — the stand-in for the Rust core's resolved
+  /// projection, in which every scalar `Binding.Transform` has been folded to the value
+  /// it evaluates to.
+  ///
+  /// A SEPARATE seed on purpose, and it is what makes the driver's choice of channel
+  /// observable at all: a fake whose two reads returned the same bytes would pass
+  /// whether the driver called `treeJSON()` or `projectResolved()` — which is exactly
+  /// how the driver came to be reading the wrong one for as long as it did. `nil` means
+  /// "no evaluator, and no Transform to resolve", which is the honest answer for the
+  /// loop tests.
+  private let resolvedTreeJSON: String?
+
+  init(_ initial: String, resolvedTreeJSON: String? = nil) {
+    self.current = initial
+    self.resolvedTreeJSON = resolvedTreeJSON
+  }
 
   func treeJSON() -> String { current }
-  func projectResolved() -> String { current }
+  func projectResolved() -> String { resolvedTreeJSON ?? current }
 
   func applyOp(_ opJSON: String) throws {
     guard case .object(let op) = try JSON.parse(opJSON) else {

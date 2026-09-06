@@ -162,6 +162,18 @@
       // every platform) and this arm is only its application.
       let placeholder = customPlaceholder(k)
       return AnyView(InfoCard(title: placeholder.title, subtitle: placeholder.identity))
+    // The `fallback` subtree is decoded and carried, and NOTHING ON ANY HOST
+    // RENDERS IT — the reference renderer takes the child too. Worth stating
+    // rather than leaving as an apparently arbitrary arm, because the obvious
+    // repair is wrong in two ways. It cannot be a DECODE fallback: decoding is
+    // total, so a malformed child fails the whole document long before this arm is
+    // reached, and swallowing that here would make this surface accept a tree the
+    // conformant hosts refuse. And it cannot be a RENDER fallback invented locally
+    // — what an error boundary catches is a normative decision, the wire
+    // specification does not make it, and a native surface that guessed would
+    // disagree with the reference host about a tree they both accept. Reaching this
+    // arm needs a specification change first; until then the child is the whole of
+    // the behaviour, on every host, deliberately.
     case .errorBoundary(let k): return AnyView(FuaranNode(k.child, ctx))
     case .switchKind(let k): return AnyView(RenderSwitch(k: k, ctx: ctx))
     case .fragmentDecl(let k): return AnyView(FuaranNode(k.body, ctx))

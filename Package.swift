@@ -12,11 +12,17 @@
 //     reference core's native staticlib.
 //
 // The session leg is wired ONLY when the native staticlib is discoverable, so a
-// checkout without it still builds + tests the pure-Swift projection (the
-// session tests skip cleanly). On Apple platforms the reference packaging is a
-// FuaranCore.xcframework binary target (assembled with xcodebuild, macOS-only);
-// on Windows/Linux the same C surface links the staticlib directly, which is how
-// the Swift↔C-ABI binding is exercised on a non-Apple dev box.
+// checkout without it still builds + tests the pure-Swift projection (the session
+// tests skip cleanly). The same C surface links the staticlib directly on every
+// platform, which is how the Swift↔C-ABI binding is exercised on a non-Apple dev
+// box as well as on macOS.
+//
+// There is NO `binaryTarget` here, and the comment that used to describe one — "on
+// Apple platforms the reference packaging is a FuaranCore.xcframework binary
+// target" — described an artefact nothing built. The consequence is worth stating
+// where a consumer will meet it: an SPM consumer of this package gets the
+// pure-Swift projection and CANNOT reach `FuaranSession`, because the staticlib is
+// not beside their manifest. See README "Consuming a live session".
 
 import Foundation
 import PackageDescription

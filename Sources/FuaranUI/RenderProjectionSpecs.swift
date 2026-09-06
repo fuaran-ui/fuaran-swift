@@ -1330,7 +1330,11 @@ extension Decode {
 
   static func fragmentArgs(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> [FragmentArgEntry] {
     let f = try object(path, j)
-    return try f.map {
+    // Sorted by name — see the `I18n.args` arm and `jvalMap`: dictionary iteration
+    // order is not a property of the document, and this slot (`FragmentRef.args`,
+    // `Mount.inputs`) decoded in a different order, and refused at a different
+    // entry when two were invalid, on every call before it was sorted.
+    return try f.sorted(by: { $0.key < $1.key }).map {
       FragmentArgEntry(name: $0.key, arg: try fragmentArg("\(path).\($0.key)", $0.value, walk))
     }
   }

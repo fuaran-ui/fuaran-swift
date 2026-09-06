@@ -115,7 +115,17 @@ enum Decode {
     guard case .number(let n) = unwrapStaticEnvelope(j) else {
       throw wrongType(path, "JSON number (integer)")
     }
-    return Int(n.rounded(.towardZero))
+    // `Int(Double)` TRAPS on a non-finite value or one outside `Int`'s range, and
+    // a Swift trap is not catchable: `1e999` in any integer slot ended the host
+    // process before this guard existed (found by the decoder fuzz leg). The
+    // reference host truncates a finite value toward zero, so that part of the
+    // contract is kept; what it cannot represent is refused by type, on the slot.
+    let t = n.rounded(.towardZero)
+    guard t.isFinite, t >= -9_223_372_036_854_775_808.0, t < 9_223_372_036_854_775_808.0
+    else {
+      throw wrongType(path, "JSON number (integer — finite and within the host's integer range)")
+    }
+    return Int(t)
   }
 
   static func array(_ path: String, _ j: JSON) throws -> [JSON] {
@@ -723,7 +733,11 @@ extension Decode {
       var args: [NamedBinding]? = nil
       if let v = f["args"] {
         let af = try object("\(path).args", v)
-        args = try af.map {
+        // Sorted by name, as `Transform.params` and `jvalMap` already are: a Swift
+        // dictionary's iteration order is not a property of the document, and an
+        // unsorted map here decoded the same bytes to a different argument order —
+        // and, with two invalid entries, to a different REFUSAL — on every call.
+        args = try af.sorted(by: { $0.key < $1.key }).map {
           NamedBinding(name: $0.key, binding: try binding("\(path).args.\($0.key)", $0.value))
         }
       }

@@ -64,10 +64,11 @@ projection**, and the session tests skip cleanly. The whole of `Session.swift`
 sits behind that flag; on a machine without the core, the file compiles to
 nothing and the decoder stands alone.
 
-On Apple platforms the reference packaging is a `FuaranCore.xcframework` binary
-target assembled with `xcodebuild`; on Windows and Linux the same C surface links
-the static library directly, which is how the Swift↔C-ABI binding gets exercised
-on a non-Apple box.
+On every platform the core reaches this package the same way today: the Rust
+staticlib, built beside this repository and linked directly by `Package.swift`
+(see the README's "Consuming a live session"). There is no `FuaranCore.xcframework`
+yet; when one is packaged it lands with a `binaryTarget` and a CI job that fails
+unless the artefact is produced, in the same change.
 
 ## Decoding a tree
 

@@ -255,38 +255,50 @@ private struct JSONParser {
   /// once a string is assembled, a pair and two halves that merely co-occur are
   /// indistinguishable.
   ///
-  /// A LONE LOW half needs no clause of its own here: `Unicode.Scalar(0xDC00)`
-  /// is `nil`, because a surrogate is not a Unicode scalar value, so it already
-  /// falls to the refusal below. That is recorded rather than left implicit,
-  /// since it is the kind of coverage that disappears in a later refactor.
+  /// A LONE LOW half is refused by a clause of its own. `Unicode.Scalar(0xDC00)`
+  /// is `nil`, because a surrogate is not a Unicode scalar value, so it would
+  /// fall to the generic refusal below in any case — but that one reports
+  /// "invalid unicode escape", which sends an author to inspect their hex digits
+  /// rather than to notice the missing high half.
+  ///
+  /// Each refusal opens with the phrase this host's refusal contract already pins
+  /// and then names the row, so the two readings of row 6 that were authored on
+  /// separate branches are one message rather than a choice between them.
   private mutating func parseUnicodeEscape() throws -> Unicode.Scalar {
     let hi = try readHex4()
     if hi >= 0xD800, hi <= 0xDBFF {
       guard i + 1 < scalars.count, scalars[i] == "\\", scalars[i + 1] == "u" else {
         throw err(
-          "an unpaired HIGH surrogate escape (WIRE_FORMAT.md §20.2 row 6): a "
-            + "\\uD800-\\uDBFF escape must be followed immediately by a \\uDC00-\\uDFFF escape")
+          "expected low surrogate — an unpaired HIGH surrogate escape "
+            + "(WIRE_FORMAT.md §20.2 row 6): a \\uD800-\\uDBFF escape must be followed "
+            + "immediately by a \\uDC00-\\uDFFF escape")
       }
       i += 2
       let lo = try readHex4()
+      // The LOW half must be IN the low-surrogate range, and checking it is not
+      // pedantry about a spelling: the arithmetic below subtracts 0xDC00
+      // unconditionally, so any other value shifts the result by an arbitrary amount.
+      // A high surrogate followed by an escape for U+0041 combined to U+0F83D — a
+      // Tibetan character bearing no relation to either half — and the
+      // `Unicode.Scalar` guard below said nothing about it, because the sum happened
+      // to land on a scalar that exists. A malformed pair became a plausible-looking
+      // wrong character, silently, in decoded document text.
       guard lo >= 0xDC00, lo <= 0xDFFF else {
         throw err(
-          "an unpaired HIGH surrogate escape (WIRE_FORMAT.md §20.2 row 6): a "
-            + "\\uD800-\\uDBFF escape must be followed by a LOW half (\\uDC00-\\uDFFF), "
-            + "not by any \\u escape")
+          "expected a low surrogate (DC00-DFFF) after a high surrogate "
+            + "(WIRE_FORMAT.md §20.2 row 6): a \\uD800-\\uDBFF escape must be followed "
+            + "by a LOW half, not by any \\u escape")
       }
       let combined = 0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00)
       guard let s = Unicode.Scalar(combined) else { throw err("invalid surrogate pair") }
       return s
     }
-    guard let s = Unicode.Scalar(hi) else {
-      if hi >= 0xDC00, hi <= 0xDFFF {
-        throw err(
-          "an unpaired LOW surrogate escape (WIRE_FORMAT.md §20.2 row 6): a "
-            + "\\uDC00-\\uDFFF escape must be preceded immediately by a \\uD800-\\uDBFF escape")
-      }
-      throw err("invalid unicode escape")
+    if hi >= 0xDC00, hi <= 0xDFFF {
+      throw err(
+        "a low surrogate (DC00-DFFF) must follow a high surrogate (D800-DBFF) — an "
+          + "unpaired LOW surrogate escape (WIRE_FORMAT.md §20.2 row 6)")
     }
+    guard let s = Unicode.Scalar(hi) else { throw err("invalid unicode escape") }
     return s
   }
 

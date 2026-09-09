@@ -53,11 +53,32 @@ public indirect enum Binding: Equatable, Sendable {
   case computed
   /// The host-furnished instant. Carries no payload: the value is supplied at resolve
   /// time by the host clock, which is why it is a `Clock`-determinism source, not wire data.
-  case now
+  ///
+  /// Phase 1533 — the declared GRAIN truncates the instant BEFORE it is read.
+  /// Absent is `second`, which is the identity; a present value outside the
+  /// four is refused rather than silently read at a neighbouring resolution.
+  case now(grain: TimeGrain?)
   case i18n(key: String, args: [NamedBinding]?)
-  case local(flushOn: LocalFlushTrigger, initialFrom: Binding)
+  /// Phase 1534 (§3.3.3) — `codec` declares the buffer's OWN codec and replaces
+  /// the identity on both sides; `commitTo` declares the State key the flush
+  /// writes to. `commitTo` and the `onCommit` closure are mutually exclusive,
+  /// because the wire cannot carry the closure and two hosts would otherwise
+  /// write to different places from identical bytes.
+  case local(
+    codec: Format?, commitTo: String?, flushOn: LocalFlushTrigger, initialFrom: Binding,
+    onCommit: Closure?)
   case format(format: Format, locale: LocaleSource, source: Binding)
   case transform(params: [TransformParam]?, pipeline: [TransformStep], source: DataSource)
+  /// Phase 1534 (§3.3.2) — ONE scalar expression evaluated to ONE value over
+  /// the SAME `ColExpr` algebra a `transform` pipeline step carries. The case
+  /// introduces no operator and no expression language of its own, so an
+  /// expression means here exactly what it means inside a `derive`.
+  ///
+  /// Two DECODE refusals, both because an `expr` has no row: a `col` reference
+  /// anywhere in the expression, and a `param` the binding's own list does not
+  /// bind. Left admitted, each would decode to an expression whose evaluation
+  /// could only ever fail, once per render, on every host.
+  case expr(expr: ColExpr, params: [TransformParam]?)
   case invoke(capabilityId: String, args: [InvokeArg])
 }
 
@@ -74,6 +95,13 @@ public enum Format: Equatable, Sendable {
   case percent(decimals: Int?)
   case date(dateStyle: DateStyle)
   case relativeTime(unit: RelativeTimeUnit)
+  /// Phase 1533 — the elapsed-time rendition. Distinct from `relativeTime`:
+  /// this one is a function of the HOST instant as well as of its source, so a
+  /// host with no instant renders nothing rather than an invented delta.
+  case since(unit: RelativeTimeUnit?)
+  /// Phase 819 — the numeric source counts `unit`s, rendered per the bounded
+  /// `style`.
+  case duration(unit: DurationUnit, style: DurationStyle)
 }
 
 public enum LocaleSource: Equatable, Sendable {
@@ -122,7 +150,12 @@ public indirect enum Action: Equatable, Sendable {
   case dispatch
   case call(endpoint: String, into: CallResultTarget?, onResult: Closure?)
   case notify(channel: String, payload: JSON)
-  case navigate(route: String)
+  /// Phase 1536 — `route` is a `TextSource`, not a bare string, so a tree can
+  /// name a destination it computes from what the reader is looking at. The
+  /// bare JSON string IS `Literal`'s canonical form, so every document written
+  /// before the widening decodes exactly as it did. `target` is the CLOSED
+  /// `Self | Blank` enum, omitted at `Self`.
+  case navigate(route: TextSource, target: NavigateTarget)
   /// Exactly ONE of `value` (a literal payload) and `valueFrom` (a binding resolved at
   /// dispatch time) is present - the schema states it as a `oneOf`, so both-present is a
   /// reject rather than a precedence question.
@@ -130,7 +163,24 @@ public indirect enum Action: Equatable, Sendable {
   case aiTool(toolName: String, args: JSON)
   case chain([Action])
   case commitLocal(nodeId: String)
-  case writeToClipboard(text: String)
+  /// Phase 1126 — the payload is a `TextSource`. A `text` that is neither a
+  /// string nor a `$type`-tagged `TextSource` is `WRONG_TYPE` and is never
+  /// coerced: a host reading the widening as "this member is now open" would
+  /// put a JSON literal on the reader's clipboard, and a clipboard is a channel
+  /// the reader later pastes somewhere with authority.
+  case writeToClipboard(text: TextSource)
+  /// Phase 1124 — the payload-free print, and the ONE action case strict about
+  /// unrecognised members: page range, size, margins and copies are the host's
+  /// page setup and the reader's dialogue, so accepting a member here would
+  /// leave the emitter believing it had constrained a printing it had not.
+  case print
+  /// Phase 1537 — ask, then act. Confirmation is bounded at ONE question: a
+  /// `confirm` reachable from either continuation is refused, and the check
+  /// walks the DECODED continuation so a `chain` cannot hide the nesting.
+  case confirm(prompt: TextSource, onConfirm: Action, onCancel: Action?)
+  /// Phase 1537 — a bare node id, the `commitLocal` shape. It addresses a node
+  /// in THIS document, so there is nothing for a binding to compute.
+  case focus(nodeId: String)
   case readFileBody(fileRef: String, encoding: FileReadEncoding)
   case invoke(capabilityId: String, args: [InvokeArg])
 }

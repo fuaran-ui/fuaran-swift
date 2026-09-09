@@ -543,6 +543,17 @@ extension Decode {
     static let date = StaticValue.ast(.string(""))
     /// ISO-empty both ends — the pair analogue of `date`'s "" placeholder.
     static let dateRange = StaticValue.stringPair("", "")
+    /// Phase 1121 — the EMPTY LIST. The token list is ordered and the order is
+    /// the reader's, so an auto-bound token field starts with no chips rather
+    /// than with a placeholder one.
+    static let tokens = StaticValue.stringList([])
+    /// Phase 1130 — `Rating` shares `Number`'s zero placeholder: an auto-bound
+    /// rating starts unrated.
+    static let rating = StaticValue.ast(.number(0))
+    /// Phase 1130 — the unset swatch. A native colour input substitutes its own
+    /// default when handed nothing, and `#000000` is that default's wire
+    /// spelling — the one `#rrggbb` form the control can hold.
+    static let color = StaticValue.ast(.string("#000000"))
   }
 
   static func formFieldKind(
@@ -655,13 +666,73 @@ extension Decode {
         variant: try bareEnum("\(path).variant", try req(path, f, "variant"), "DateVariant"),
         min: try optString(path, f, "min"), max: try optString(path, f, "max"),
         step: try optFloat(path, f, "step"), onChange: onChange)
+    // Phase 1121 — every member OPTIONAL, and `allowFreeText` omits at TRUE.
+    // The one decode refusal is the control that CANNOT EXIST: free text denied
+    // and no suggestion source, so no gesture could ever put a token in. It is
+    // refused at `allowFreeText` rather than at `suggestions`, because the
+    // member that was WRITTEN is the one naming the impossible state — an
+    // absent `suggestions` is the ordinary open token box.
+    case "Tokens":
+      let suggestions = try optBindingSlot(path, f, "suggestions", .options)
+      let allowFreeText = try optBool(path, f, "allowFreeText") ?? true
+      if !allowFreeText && suggestions == nil {
+        throw wrongType(
+          "\(path).allowFreeText",
+          "a Tokens field admitting no free text to declare a suggestion source — with neither, "
+            + "no gesture could ever put a token into it")
+      }
+      return .tokens(
+        value: try valueOr(.stringList, ControlValueDefaults.tokens),
+        suggestions: suggestions, allowFreeText: allowFreeText, onChange: onChange)
+    // Phase 1130 — `max` IS the scale, so it is required and a value below 1 is
+    // refused rather than clamped. Note the asymmetry the corpus pins: the
+    // SCALE is refused here and the VALUE is not, because a bound value is
+    // invisible to a decoder and a rule enforced only on literals would be two
+    // rules wearing one name.
+    case "Rating":
+      let scale = try reqInt(path, f, "max")
+      if scale < 1 {
+        throw wrongType(
+          "\(path).max",
+          "a rating scale of at least 1 — a scale with no positions has nothing to draw and no "
+            + "keystroke that could change anything")
+      }
+      return .rating(
+        value: try valueOr(.float, ControlValueDefaults.rating), max: scale,
+        // Governs ENTRY granularity, never display: a host must not quantise a
+        // resolved value to it.
+        allowHalf: try optBool(path, f, "allowHalf") ?? false, onChange: onChange)
+    // Phase 1130 — only the STATIC case is judged here, and the split is
+    // recorded rather than hidden: a state / query / selection binding carries
+    // its text from outside the document, where a decoder cannot see it.
+    case "Color":
+      let value = try valueOr(.str, ControlValueDefaults.color)
+      if case .staticValue(.ast(.string(let literal))) = value, !isHexColour(literal) {
+        throw wrongType(
+          "\(path).value",
+          "a `#rrggbb` colour — the one shape a native colour input can hold, so a literal "
+            + "outside it names a colour this control could never carry")
+      }
+      return .color(value: value, onChange: onChange)
     case let o:
       throw unknownCase(
         path, o,
         "Text | Number | Checkbox | Choice | Combobox | Range | RangedNumber | SegmentedChoice "
-          + "| TextArea | Date | DateRange"
+          + "| TextArea | Date | DateRange | Tokens | Rating | Color"
       )
     }
+  }
+
+  /// `#rrggbb` — six hexadecimal digits after a `#`, either case (§3.6.17).
+  /// Deliberately narrower than CSS: it is the one shape a native colour input
+  /// can hold or return, so `#fff`, `rebeccapurple`, `rgb(0 0 0)` and an alpha
+  /// channel all name a colour this control could never carry.
+  static func isHexColour(_ s: String) -> Bool {
+    let u = Array(s.utf8)
+    return u.count == 7 && u[0] == UInt8(ascii: "#")
+      && u[1...].allSatisfy {
+        ($0 >= 48 && $0 <= 57) || ($0 >= 65 && $0 <= 70) || ($0 >= 97 && $0 <= 102)
+      }
   }
 
   /// The cross-field operand: an operator plus a `Binding` to compare against.
@@ -790,11 +861,37 @@ extension Decode {
     let f = try object(path, j)
     let accept = try array("\(path).accept", try req(path, f, "accept")).enumerated()
       .map { try string("\(path).accept[\($0.0)]", $0.1) }
+    // Phase 1116 — OPTIONAL, not omit-at-default: an absent member asks for the
+    // ordinary picker, which is not one of the two devices wearing a default,
+    // and an unrecognised value MUST NOT fall back to either device.
+    var captureV: CaptureSource? = nil
+    if let c = f["capture"] {
+      captureV = try bareEnum("\(path).capture", c, "CaptureSource")
+    }
+    // Phase 1117 — the empty string is a name no host registers, so a document
+    // carrying it describes an upload that can never stream. Refused rather
+    // than read as absence: that coercion silently turns an upload the author
+    // meant to stream into a client-only one, while every visible thing about
+    // the control still works.
+    let destinationV = try optString(path, f, "destination")
+    if destinationV == "" {
+      throw wrongType(
+        "\(path).destination",
+        "a registered destination name — an absent member is already the spelling for an upload "
+          + "that streams nowhere")
+    }
     return FileUploadSpec(
       accept: accept,
       label: try reqTextSource(path, f, "label"),
       multiple: try reqBool(path, f, "multiple"),
-      disabled: try optBindingSlot(path, f, "disabled", .bool))
+      disabled: try optBindingSlot(path, f, "disabled", .bool),
+      // Phase 1115 — read through the STRICT bool reader: each slot decides
+      // whether a whole ingress route exists, and a truthiness read would open
+      // a drop target on `"no"` and `"false"` alike.
+      dropTarget: try optBool(path, f, "dropTarget") ?? false,
+      acceptPaste: try optBool(path, f, "acceptPaste") ?? false,
+      capture: captureV,
+      destination: destinationV)
   }
 
   // ── Visualisation specs ────────────────────────────────────────────────────
@@ -1015,13 +1112,165 @@ extension Decode {
       pageStateKey: try optString(path, f, "pageStateKey"),
       editStateKey: try optString(path, f, "editStateKey"),
       pageSize: pageSizeV,
-      defaultSort: gridSortV)
+      defaultSort: gridSortV,
+      // Phase 1473 — the paginated-media pair, on Box's terms.
+      keepRowsTogether: try optBool(path, f, "keepRowsTogether") ?? false,
+      repeatHeader: try optBool(path, f, "repeatHeader") ?? false,
+      // Phase 1123 — a bool, omitted at `false`, never truthiness-coerced: the
+      // slot decides whether a whole affordance exists.
+      exportable: try optBool(path, f, "exportable") ?? false,
+      // Phase 1125 — separate decoder arms, so a wrong type on either is
+      // reported at its own path.
+      transferInKey: try optString(path, f, "transferInKey"),
+      transferOutKey: try optString(path, f, "transferOutKey"))
+  }
+
+  /// `true` when `text` is a canonical ISO-8601 date the temporal axis can
+  /// place — `YYYY-MM-DD`, optionally followed by `T…` whose time-of-day is
+  /// discarded.
+  ///
+  /// STRICT by shape AND by calendar: four digits, two, two, both hyphens, a
+  /// month in 1–12 and a day the month actually has. A locale spelling
+  /// (`15/01/2026`) and an impossible day (`2026-13-05`) are both refused,
+  /// because an unreadable date is not a date drawn slightly wrong — it is one
+  /// drawn at the epoch, dragging the axis back with it.
+  static func isCanonicalIsoDay(_ text: String) -> Bool {
+    let u = Array(text.utf8)
+    guard u.count >= 10 else { return false }
+    if u.count > 10 && u[10] != UInt8(ascii: "T") { return false }
+    guard u[4] == UInt8(ascii: "-"), u[7] == UInt8(ascii: "-") else { return false }
+    func digits(_ lo: Int, _ hi: Int) -> Int? {
+      var n = 0
+      for k in lo..<hi {
+        let c = u[k]
+        guard c >= 48, c <= 57 else { return nil }
+        n = n * 10 + Int(c - 48)
+      }
+      return n
+    }
+    guard let year = digits(0, 4), let month = digits(5, 7), let day = digits(8, 10) else {
+      return false
+    }
+    guard month >= 1, month <= 12, day >= 1 else { return false }
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+    let lengths = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    return day <= lengths[month - 1]
+  }
+
+  /// Phase 1491 (§4l) — an annotation's x address.
+  static func chartAnnotationX(_ path: String, _ j: JSON) throws -> ChartAnnotationX {
+    let f = try object(path, j)
+    switch try disc(path, f) {
+    case "Category": return .category(key: try reqString(path, f, "key"))
+    case "Date":
+      let iso = try reqString(path, f, "iso")
+      guard isCanonicalIsoDay(iso) else {
+        throw wrongType(
+          "\(path).iso",
+          "a canonical ISO-8601 date (YYYY-MM-DD, optionally followed by a time) naming a real "
+            + "calendar day — an event marker's date is the address it is drawn at, and an "
+            + "unreadable one would place the marker at 1970-01-01 and drag the axis back with it")
+      }
+      return .date(iso: iso)
+    case let o: throw unknownCase(path, o, "Category, Date")
+    }
+  }
+
+  /// Phase 1492 (§4l) — a range band's PAIR.
+  ///
+  /// TWO REFUSALS, and they are the pair rules the WIRE can decide by itself. A
+  /// non-finite endpoint is the reference line's narrowing at two slots instead
+  /// of one, for its reason exactly: §4l rule 3 has both ends enter the value
+  /// domain, so a NaN takes the nice-domain, every gridline and every mark with
+  /// it. An UNORDERED pair is refused at the PAIR's own slot — the defect is the
+  /// pair's, not either end's — rather than silently swapped, because a band
+  /// written backwards is an author's mistake about their own data and swapping
+  /// the ends would draw a picture they did not describe.
+  ///
+  /// A CATEGORY pair's order is NOT decided here: the order of two band keys is
+  /// the ROWS' order, a cross-reference rather than a local property of the
+  /// address.
+  static func chartAnnotationRange(_ path: String, _ j: JSON) throws -> ChartAnnotationRange {
+    let f = try object(path, j)
+    switch try disc(path, f) {
+    case "ValueRange":
+      let from = try reqFloat(path, f, "from")
+      let to = try reqFloat(path, f, "to")
+      for (slot, v) in [("from", from), ("to", to)] where !v.isFinite {
+        throw wrongType(
+          "\(path).\(slot)",
+          "a FINITE JSON number — a range band's end names a place on the value axis, and NaN / "
+            + "Infinity names none; give the value in the axis's own units, or drop the annotation")
+      }
+      if from > to {
+        throw wrongType(
+          path,
+          "an ORDERED pair — a range band runs from its lower value to its upper one, and this "
+            + "pair runs backwards; swapping the ends silently would draw a band the author did "
+            + "not describe")
+      }
+      return .valueRange(from: from, to: to)
+    case "XRange":
+      let from = try chartAnnotationX("\(path).from", try req(path, f, "from"))
+      let to = try chartAnnotationX("\(path).to", try req(path, f, "to"))
+      // Both dates are already known canonical and calendar-valid (the address
+      // decoder refused anything else), and a canonical `YYYY-MM-DD` sorts
+      // lexicographically exactly as it sorts chronologically — so no calendar
+      // arithmetic is needed here.
+      if case .date(let a) = from, case .date(let b) = to, a > b {
+        throw wrongType(
+          path,
+          "an ORDERED pair — a range band runs from its earlier date to its later one, and this "
+            + "pair runs backwards; swapping the ends silently would draw a band the author did "
+            + "not describe")
+      }
+      return .xRange(from: from, to: to)
+    case let o: throw unknownCase(path, o, "ValueRange, XRange")
+    }
+  }
+
+  /// Phase 1490 (§4l) — a chart's data-addressed annotation.
+  ///
+  /// THE REFERENCE LINE'S VALUE MUST BE FINITE, and that is a slot-specific
+  /// NARROWING of §7 rather than a disagreement with it. §7 admits the quoted
+  /// `"NaN"` / `"Infinity"` / `"-Infinity"` sentinels at every float slot and
+  /// the float reader honours them — that widening is deliberate and stays. But
+  /// a reference line addresses a place on the VALUE AXIS, and a non-finite
+  /// value names no such place: it would enter the domain computation and put
+  /// every gridline, tick and mark at a NaN coordinate. The picture is not
+  /// merely wrong at the annotation, it is wrong everywhere.
+  static func chartAnnotation(_ path: String, _ j: JSON) throws -> ChartAnnotation {
+    let f = try object(path, j)
+    let label = try optTextSource(path, f, "label")
+    switch try disc(path, f) {
+    case "ReferenceLine":
+      let value = try reqFloat(path, f, "value")
+      guard value.isFinite else {
+        throw wrongType(
+          "\(path).value",
+          "a FINITE JSON number — a reference line names a place on the value axis, and NaN / "
+            + "Infinity names none; give the value in the axis's own units, or drop the annotation")
+      }
+      return .referenceLine(value: value, label: label)
+    case "EventMarker":
+      return .eventMarker(
+        at: try chartAnnotationX("\(path).at", try req(path, f, "at")), label: label)
+    case "RangeBand":
+      return .rangeBand(
+        range: try chartAnnotationRange("\(path).range", try req(path, f, "range")), label: label)
+    case let o: throw unknownCase(path, o, "ReferenceLine, EventMarker, RangeBand")
+    }
   }
 
   static func chartSpec(_ path: String, _ j: JSON) throws -> ChartSpec {
     let f = try object(path, j)
     let yFields = try array("\(path).yFields", try req(path, f, "yFields")).enumerated()
       .map { try string("\(path).yFields[\($0.0)]", $0.1) }
+    var annotationsV: [ChartAnnotation]? = nil
+    if let v = f["annotations"] {
+      annotationsV = try array("\(path).annotations", v).enumerated()
+        .map { try chartAnnotation("\(path).annotations[\($0.0)]", $0.1) }
+    }
     return ChartSpec(
       kind: try bareEnum("\(path).kind", try req(path, f, "kind"), "ChartKind"),
       // Field alias: data → source.
@@ -1030,7 +1279,8 @@ extension Decode {
       xField: try reqString(path, f, "xField"),
       yFields: yFields,
       title: try optTextSource(path, f, "title"),
-      onPointClick: optClosure(f, "onPointClick"))
+      onPointClick: optClosure(f, "onPointClick"),
+      annotations: annotationsV)
   }
 
   static func mapSpec(_ path: String, _ j: JSON) throws -> MapSpec {
@@ -1106,12 +1356,19 @@ extension Decode {
       // Field alias: title → heading (Box is in the scoped set).
       heading: try optTextSourceAliased(path, f, "heading", ["title"]),
       layout: try boxLayout("\(path).layout", try req(path, f, "layout")),
-      role: role)
+      role: role,
+      // Phase 1473 — the print-break pair, omitted at `false` and never
+      // truthiness-coerced.
+      breakBefore: try optBool(path, f, "breakBefore") ?? false,
+      keepTogether: try optBool(path, f, "keepTogether") ?? false)
   }
 
   static func legacyDashboard(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> BoxSpec {
     let f = try object(path, j)
-    return BoxSpec(children: try children(path, f, walk), heading: nil, layout: .auto, role: .dashboard)
+    // A LEGACY tag carries none of the print-break declarations by construction.
+    return BoxSpec(
+      children: try children(path, f, walk), heading: nil, layout: .auto, role: .dashboard,
+      breakBefore: false, keepTogether: false)
   }
 
   static func legacyStack(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> BoxSpec {
@@ -1121,7 +1378,7 @@ extension Decode {
     return BoxSpec(
       children: try children(path, f, walk), heading: nil,
       layout: .flex(direction: direction, gap: nil, wrap: try reqBool(path, f, "wrap")),
-      role: .group)
+      role: .group, breakBefore: false, keepTogether: false)
   }
 
   static func legacyGridLayout(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> BoxSpec {
@@ -1131,14 +1388,15 @@ extension Decode {
       layout: .grid(
         cols: try reqInt(path, f, "cols"), gap: nil,
         templateColumns: try optString(path, f, "templateColumns")),
-      role: .group)
+      role: .group, breakBefore: false, keepTogether: false)
   }
 
   static func legacyCard(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> BoxSpec {
     let f = try object(path, j)
     return BoxSpec(
       children: try children(path, f, walk), heading: try optTextSource(path, f, "heading"),
-      layout: .flex(direction: .vertical, gap: nil, wrap: false), role: .card)
+      layout: .flex(direction: .vertical, gap: nil, wrap: false), role: .card,
+      breakBefore: false, keepTogether: false)
   }
 
   static func splitPanelSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> SplitPanelSpec {
@@ -1226,7 +1484,14 @@ extension Decode {
       open: try reqBindingSlot(path, f, "open", .bool),
       onDismiss: onDismiss,
       // Field alias: title → heading.
-      heading: try optTextSourceAliased(path, f, "heading", ["title"]))
+      heading: try optTextSourceAliased(path, f, "heading", ["title"]),
+      // §3.6.11 — omitted at `Modal`, the blocking modality every pre-modality
+      // document meant. Neither a non-string nor an unrecognised token falls
+      // back: a document asking for a popover and getting a blocking modal has
+      // been answered with a different affordance.
+      modality: try f["modality"].map {
+        try bareEnum("\(path).modality", $0, "ModalityKind")
+      } ?? .modal)
   }
 
   static func scrollAreaSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> ScrollAreaSpec {
@@ -1399,7 +1664,8 @@ extension Decode {
           columns: [], editable: false, source: .staticValue(.ast(.string(OPAQUE))),
           onRowClick: nil, rowKey: nil, rowKeyField: nil, staticRows: rows,
           sortStateKey: nil, pageStateKey: nil, editStateKey: nil, pageSize: nil,
-          defaultSort: nil))
+          defaultSort: nil, keepRowsTogether: false, repeatHeader: false, exportable: false,
+          transferInKey: nil, transferOutKey: nil))
     case "Map": return .map(try mapSpec(path, j))
     // Structural.
     case "Custom":
@@ -1425,11 +1691,30 @@ extension Decode {
     case "Switch":
       let cases = try array("\(path).cases", try req(path, f, "cases")).enumerated()
         .map { (i, item) -> SwitchCase in
-          let cf = try object("\(path).cases[\(i)]", item)
+          let cp = "\(path).cases[\(i)]"
+          let cf = try object(cp, item)
+          // Phase 1535 — EXACTLY ONE of `match` and `when`. "Both" is refused
+          // rather than resolved by precedence (a precedence rule would have to
+          // be specified, agreed on every host and remembered by every author,
+          // for a document nobody meant to write); "neither" keeps the pre-1535
+          // MISSING_FIELD at `.match`, which is what the corpus pins — a case
+          // naming no condition is not one that never matches, and skipping it
+          // silently is the class of silence the predicate form was added to
+          // remove.
+          let condition: SwitchCondition
+          if cf["match"] != nil && cf["when"] != nil {
+            throw wrongType(
+              "\(cp).when",
+              "exactly one of 'match' and 'when' — a precedence rule between them would have to "
+                + "be agreed on every host for a document nobody meant to write")
+          } else if let w = cf["when"] {
+            condition = .when(try bindingSlot("\(cp).when", w, .bool))
+          } else {
+            condition = .match(try reqString(cp, cf, "match"))
+          }
           return SwitchCase(
-            matchValue: try reqString("\(path).cases[\(i)]", cf, "match"),
-            child: try node(
-              "\(path).cases[\(i)].child", try req("\(path).cases[\(i)]", cf, "child"), walk))
+            condition: condition,
+            child: try node("\(cp).child", try req(cp, cf, "child"), walk))
         }
       // The selector widened: `on` takes any Binding (a `Selection` makes the branch
       // follow the clicked row), so `stateKey` is no longer required on its own. The
@@ -1440,12 +1725,31 @@ extension Decode {
       var switchOn: Binding? = nil
       if let v = f["on"] { switchOn = try binding("\(path).on", v) }
       if switchKey == nil && switchOn == nil { throw missing(path, "stateKey") }
+      // Phase 1122 — a POSITIVE INTEGER count of milliseconds. Non-positive is
+      // refused rather than canonicalised: `0` is what an emitter reaches for
+      // to mean "off" and absence is already that spelling, so rewriting it
+      // would make two document shapes mean one thing and tell the emitter
+      // nothing about its misreading. Fractional is refused separately — the
+      // slot is an integer count, and a decoder truncating where another
+      // rounded would leave two hosts disagreeing about a document neither
+      // refused. Both fall out of the strict integer reader plus the bound.
+      var advanceV: Int? = nil
+      if let v = f["autoAdvanceMs"] {
+        let ms = try int("\(path).autoAdvanceMs", v)
+        if ms < 1 {
+          throw wrongType(
+            "\(path).autoAdvanceMs",
+            "a positive millisecond interval — an absent key is already the spelling for off")
+        }
+        advanceV = ms
+      }
       return .switchKind(
         SwitchSpec(
           stateKey: switchKey,
           cases: cases,
           defaultChild: try node("\(path).default", try req(path, f, "default"), walk),
-          on: switchOn))
+          on: switchOn,
+          autoAdvanceMs: advanceV))
     case "FragmentDecl":
       var holes: [HoleDecl] = []
       if let v = f["holes"] {
@@ -1504,11 +1808,17 @@ extension Decode {
     let voice: FontVoice =
       try f["voice"].map { try bareEnum("\(path).voice", $0, "FontVoice") } ?? .default
     // Phase 460 — tone/weight/emphasis omitted-when-default (as role/voice).
+    // Phase 1472 — omitted at `auto`, the inherited direction. Neither a
+    // non-string nor an unrecognised token falls back to `auto`: a document
+    // declaring a direction the host cannot read must not be rendered in the
+    // opposite one in silence.
+    let direction: TextDirection =
+      try f["direction"].map { try bareEnum("\(path).direction", $0, "TextDirection") } ?? .auto
     return SemanticStyle(
       emphasis: try optEmphasisDefault(path, f, "emphasis"),
       tone: try optToneDefault(path, f, "tone"),
       weight: try optWeightDefault(path, f, "weight"),
-      role: role, voice: voice)
+      role: role, voice: voice, direction: direction)
   }
 
   /// The `Accessibility` trait's near-miss set (WIRE_FORMAT 3.1 "Near-miss slot names

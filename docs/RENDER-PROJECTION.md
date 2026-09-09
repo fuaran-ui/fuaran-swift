@@ -410,26 +410,46 @@ under a right-looking key.
   answered with the wrong code (or, for the two track vectors and the tooltip
   one, **accepted a malformed document outright**) now refuse with the pinned code
   and path.
-- **What the wave still owes here**, all of it outside those five: form-field
-  kinds `Tokens`, `Rating` and `Color` are unmodelled; `WriteToClipboard` has
-  widened from a bare string to a text source, so a bound payload is refused as
-  `WRONG_TYPE`; `FileUpload` silently drops `capture`, `destination`, `dropTarget`
-  and `acceptPaste`; `Modal.modality` and `SemanticStyle.direction` are accepted
-  permissively where the corpus pins a refusal; and the four print-break controls
-  are likewise unmodelled. Ten reject vectors name that residue, and the corpus
-  reject leg is red on exactly those ten.
+- **That residue is CLOSED (Phase 1499).** It read: form-field kinds `Tokens`,
+  `Rating` and `Color` unmodelled; `WriteToClipboard` widened from a bare string
+  to a text source, so a bound payload was refused as `WRONG_TYPE`; `FileUpload`
+  silently dropping `capture`, `destination`, `dropTarget` and `acceptPaste`;
+  `Modal.modality` and `SemanticStyle.direction` accepted permissively where the
+  corpus pins a refusal; and the four print-break controls unmodelled. All of it
+  is adopted, along with the vocabulary the same corpus had grown around it —
+  `Action.Confirm` / `Print` / `Focus`, `Navigate`'s text-source route and closed
+  target, `Binding.Expr`, `Binding.Local`'s `codec` and `commitTo`,
+  `Binding.Now`'s grain, `Format.Since` and `Duration`, `Switch`'s predicate
+  cases and timed advance, `DataGrid`'s export and transfer keys, and the chart
+  annotation family. **Every node fixture decodes and every reject vector refuses
+  with the pinned code at the pinned path**, so `conformance-residue.txt` carries
+  no reject line at all.
+
+  Two strictness rules came with them and are worth naming, because both were
+  places this host silently ACCEPTED a document the corpus refuses rather than
+  merely failing to model one. The integer slot admits a finite number with no
+  fractional part inside the signed 32-bit range and nothing else — it had
+  truncated `2.9` to `2`, and a unit test asserted that truncation as reference
+  behaviour it never was. And the JSON number grammar is checked before
+  `Double(_:)` is asked to parse, because Swift's initialiser accepts `03`, `3.`,
+  `.5`, `+1`, `0x1p3`, `inf` and `nan` — none of them a JSON number, every one of
+  them yielding a perfectly ordinary `Double`. A raw C0 control character inside
+  a string is `INVALID_JSON` on the same rule.
 - **The render-obligation roster is short by two claims**, down from nine. The
   artefact declares nineteen; this surface registers fifteen checkers and two
   declared exemptions. The two that remain — `FileUpload/picker-always-present`
   and `Modal/aria-modal-only-when-blocking` — report as *unchecked with no checker
-  registered*, which **reds that gate against today's corpus**, and they are
-  deliberately left that way rather than exempted. An exemption is a statement
-  that this surface structurally cannot check a claim; these two are unchecked
-  because the surface does not yet model the SLOTS the claims are about, which is
-  unadopted work rather than a platform limit. Declaring an exemption would turn
-  the gate green over a capability nobody has adopted, which is the one thing the
-  mechanism exists to prevent. Not checked is not passed, and silence is never an
-  answer.
+  registered*, and they are deliberately left that way rather than exempted.
+
+  **Their REASON changed with Phase 1499 even though their status did not, and
+  the distinction is worth keeping straight.** It was that the surface did not
+  model the slots the claims are about; the slots are modelled now — `FileUpload`
+  carries `capture`, `destination`, `dropTarget` and `acceptPaste`, and
+  `ModalSpec` carries `modality` — so what remains is exactly what the residue
+  line says on its face: no checker is registered. That is still unadopted work
+  rather than a platform limit, and declaring an exemption would turn the gate
+  green over a claim nobody has answered, which is the one thing the mechanism
+  exists to prevent. Not checked is not passed, and silence is never an answer.
 - **Three adoption bars are open**: contract cards, timed advance, and streamed
   upload. A host that has not adopted is not thereby exempt — it owes the
   obligation and has simply not made its answer visible.

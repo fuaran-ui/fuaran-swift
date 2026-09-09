@@ -82,6 +82,12 @@
 //    minimised documents the leg reported. The leg carried a QUARANTINE for those
 //    inputs until the fix landed; it is gone, and every generated input is decoded.
 //
+//    Phase 1499 completed that slot's accept set against the corpus rather than
+//    against this host's habits: a FRACTION is refused as well, since §7.1 admits
+//    a finite number with no fractional part inside the signed 32-bit range and
+//    nothing else. The guard had truncated toward zero, and the test asserted the
+//    truncation as reference behaviour it never was.
+//
 // 2. Three decode sites mapped a Swift `Dictionary` into an ORDER-SENSITIVE array
 //    without sorting it — `Decode.fragmentArgs` (`FragmentRef.args`,
 //    `Mount.inputs`) and the `TextSource.I18n.args` arm — so the same bytes decoded
@@ -1243,14 +1249,34 @@ final class DecoderFuzzTests: XCTestCase {
       }
     }
 
-    // The accepted side did not move: a finite in-range value truncates toward
-    // zero, as the reference host's decoder does.
-    guard
-      case .heading(let spec) = try RenderProjection.decodeNode(
-        #"{"id":"a","kind":{"$type":"Heading","level":2.9,"text":"x","variant":"Standard"}}"#
-      ).kind
-    else { return XCTFail("a Heading with a fractional level no longer decodes") }
-    XCTAssertEqual(spec.level, 2, "a finite value truncates toward zero, as the reference host does")
+    // Phase 1499 — a FRACTION is refused too, and this assertion is what
+    // changed. It read `level: 2.9` decoding to `2`, "as the reference host's
+    // decoder does"; the reference host does not, and the corpus says so
+    // directly (`reject/reject-int-slot-fractional`, WRONG_TYPE at
+    // `$.kind.rows`). Truncating silently discards the author's value at a slot
+    // the author chose to type as an integer, and the two hosts disagreeing
+    // about it is exactly what the corpus exists to catch. The belief was
+    // recorded here rather than measured against the oracle.
+    do {
+      _ = try RenderProjection.decodeNode(
+        #"{"id":"a","kind":{"$type":"Heading","level":2.9,"text":"x","variant":"Standard"}}"#)
+      XCTFail("ACCEPTED a fractional integer slot")
+    } catch let e as FuaranDecodeError {
+      XCTAssertEqual(e.code, .wrongType, "a fraction at an int slot is WRONG_TYPE — \(e)")
+      XCTAssertEqual(e.path, "$.kind.level", "the refusal names the slot — \(e)")
+    }
+
+    // The accepted side, which did NOT move: `2.0` and `2` denote the same
+    // integer, and refusing the first would refuse a document whose intent is
+    // unambiguous, for its spelling.
+    for spelling in ["2", "2.0"] {
+      guard
+        case .heading(let spec) = try RenderProjection.decodeNode(
+          #"{"id":"a","kind":{"$type":"Heading","level":"# + spelling + #","text":"x","variant":"Standard"}}"#
+        ).kind
+      else { return XCTFail("a Heading with level \(spelling) no longer decodes") }
+      XCTAssertEqual(spec.level, 2, "\(spelling) denotes the integer 2")
+    }
   }
 
   /// The SECOND defect this leg found, now a regression test on the fix: a

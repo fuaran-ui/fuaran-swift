@@ -80,12 +80,15 @@ public struct BindingContext: Sendable {
     // empty rather than inventing a time that would then differ from the host's.
     case .now: return ""
     case .i18n(let key, _): return key
-    case .local(_, let initialFrom): return resolve(initialFrom)
+    case .local(_, _, _, let initialFrom, _): return resolve(initialFrom)
     case .format(_, _, let source):
       // Render floor: show the underlying value; number/date formatting is
       // applied by the host in Phase 541.
       return resolve(source)
-    case .transform: return ""
+    // A DERIVED value this floor cannot compute is ABSENT, not empty: the host
+    // owns the evaluator, so answering anything else would invent a figure.
+    // Phase 1534 — `expr` joins `transform` on exactly those terms.
+    case .transform, .expr: return ""
     case .invoke: return ""
     }
   }
@@ -129,12 +132,12 @@ public struct BindingContext: Sendable {
       return numbers(defaultValue)
     case .filter(_, let defaultValue), .selection(_, let defaultValue, _):
       return defaultValue.map(numbers) ?? []
-    case .local(_, let initialFrom): return resolveNumbers(initialFrom)
+    case .local(_, _, _, let initialFrom, _): return resolveNumbers(initialFrom)
     case .format(_, _, let source): return resolveNumbers(source)
     // A series this floor cannot resolve is an ABSENT series, not a zero-length
     // reading of one: the host owns queries, compute and the clock, so answering
     // anything else would be inventing data.
-    case .query, .computed, .now, .i18n, .transform, .invoke: return []
+    case .query, .computed, .now, .i18n, .transform, .expr, .invoke: return []
     }
   }
 

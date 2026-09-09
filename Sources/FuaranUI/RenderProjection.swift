@@ -115,17 +115,40 @@ enum Decode {
     guard case .number(let n) = unwrapStaticEnvelope(j) else {
       throw wrongType(path, "JSON number (integer)")
     }
-    // `Int(Double)` TRAPS on a non-finite value or one outside `Int`'s range, and
-    // a Swift trap is not catchable: `1e999` in any integer slot ended the host
-    // process before this guard existed (found by the decoder fuzz leg). The
-    // reference host truncates a finite value toward zero, so that part of the
-    // contract is kept; what it cannot represent is refused by type, on the slot.
-    let t = n.rounded(.towardZero)
-    guard t.isFinite, t >= -9_223_372_036_854_775_808.0, t < 9_223_372_036_854_775_808.0
-    else {
-      throw wrongType(path, "JSON number (integer — finite and within the host's integer range)")
+    // §7.1 — the integer-slot accept set is a FINITE JSON number with NO
+    // fractional part, inside the signed 32-bit range.
+    //
+    // `2.0` decodes as `2`: the two denote the same integer, and refusing the
+    // first would refuse a document whose intent is unambiguous, for its
+    // spelling. `2.5` is a WRONG_TYPE rather than a truncation, which silently
+    // discarded the author's value at a slot the author chose to type as an
+    // integer. And `1e10` is a WRONG_TYPE rather than a cast: that is the row
+    // that was measured across hosts, since a saturating cast on one runtime
+    // and an implementation-defined one on another turned the same bytes into
+    // two different integers.
+    //
+    // `Int(Double)` also TRAPS on a non-finite value or one outside `Int`'s
+    // range, and a Swift trap is not catchable — `1e999` in any integer slot
+    // ended the host process before a guard existed here (found by the decoder
+    // fuzz leg). The range check below subsumes that.
+    guard n.isFinite else {
+      throw wrongType(
+        path,
+        "JSON number (integer — an integer slot has no non-finite form)")
     }
-    return Int(t)
+    guard n.rounded(.towardZero) == n else {
+      throw wrongType(
+        path,
+        "JSON number (integer — an integer slot holds no fraction, and truncating would discard "
+          + "a value the author typed)")
+    }
+    guard n >= -2_147_483_648.0, n <= 2_147_483_647.0 else {
+      throw wrongType(
+        path,
+        "JSON number (integer — within the signed 32-bit range; a value the slot cannot hold is "
+          + "not a value to be reinterpreted)")
+    }
+    return Int(n)
   }
 
   static func array(_ path: String, _ j: JSON) throws -> [JSON] {
@@ -600,7 +623,22 @@ extension Decode {
     case "RelativeTime":
       return .relativeTime(
         unit: try bareEnum("\(path).unit", try req(path, f, "unit"), "RelativeTimeUnit"))
-    case let o: throw unknownCase(path, o, "Number | Currency | Percent | Date | RelativeTime")
+    // Phase 1533 — `unit` is OPTIONAL here and its absence is the
+    // auto-selection request, not a default. Present-but-unreadable is still a
+    // refusal.
+    case "Since":
+      var sinceUnit: RelativeTimeUnit? = nil
+      if let u = f["unit"] {
+        sinceUnit = try bareEnum("\(path).unit", u, "RelativeTimeUnit")
+      }
+      return .since(unit: sinceUnit)
+    case "Duration":
+      return .duration(
+        unit: try bareEnum("\(path).unit", try req(path, f, "unit"), "DurationUnit"),
+        style: try bareEnum("\(path).style", try req(path, f, "style"), "DurationStyle"))
+    case let o:
+      throw unknownCase(
+        path, o, "Number | Currency | Percent | Date | RelativeTime | Since | Duration")
     }
   }
 
@@ -727,7 +765,16 @@ extension Decode {
       return .state(key: key, defaultValue: dv)
     case "Computed": return .computed
     // The host-furnished instant - no payload; the host clock supplies the value.
-    case "Now": return .now
+    // Phase 1533 — the declared `grain` is the one wire field, optional, absent
+    // meaning `Second`. Present-but-unreadable is a REFUSAL rather than a
+    // silent fallback to the default: a document naming a grain the host cannot
+    // honour must not be rendered at a neighbouring resolution in silence.
+    case "Now":
+      var grain: TimeGrain? = nil
+      if let g = f["grain"] {
+        grain = try bareEnum("\(path).grain", g, "TimeGrain")
+      }
+      return .now(grain: grain)
     case "I18n":
       let key = try reqString(path, f, "key")
       var args: [NamedBinding]? = nil
@@ -751,7 +798,41 @@ extension Decode {
       } else {
         flush = .onBlur
       }
-      return .local(flushOn: flush, initialFrom: initial)
+      // §3.3.3 — the buffer's own codec REPLACES the identity on both sides:
+      // `format` renders through it, `parse` inverts it. The admitted set is
+      // therefore the `Format` cases with a TOTAL, LOCALE-INDEPENDENT inverse,
+      // and today that is `Number` alone. Every other case is refused with a
+      // stated reason rather than by omission — `Currency` prepends a
+      // locale-chosen symbol, `Date`'s styles are locale renditions with no
+      // parse, and `Percent` (the one that looks admissible) needs a ×100 scale
+      // whose IEEE round trip is not exact, so admitting it would mean
+      // specifying a rounding to the bit on every host.
+      var codec: Format? = nil
+      if let c = f["codec"] {
+        let decoded = try format("\(path).codec", c)
+        guard case .number = decoded else {
+          throw wrongType(
+            "\(path).codec",
+            "a Format with a total, locale-independent inverse — Number alone, since whatever "
+              + "the buffer renders it must also parse back from what the reader typed")
+        }
+        codec = decoded
+      }
+      let onCommit = optClosure(f, "onCommit")
+      let commitTo = try optString(path, f, "commitTo")
+      // Mutually exclusive, and a refusal rather than a precedence rule: the
+      // wire cannot carry the closure — it is `"<closure>"` and nothing more —
+      // so a host honouring `onCommit` and a host honouring `commitTo` would
+      // write to different places from identical bytes.
+      if onCommit != nil && commitTo != nil {
+        throw wrongType(
+          "\(path).commitTo",
+          "exactly one of 'onCommit' and 'commitTo' — the wire cannot carry the closure, so two "
+            + "hosts would write to different places from identical bytes")
+      }
+      return .local(
+        codec: codec, commitTo: commitTo, flushOn: flush, initialFrom: initial,
+        onCommit: onCommit)
     case "Format":
       let source = try binding("\(path).source", try req(path, f, "source"))
       let fmt = try format("\(path).format", try req(path, f, "format"))
@@ -760,28 +841,49 @@ extension Decode {
     case "Transform":
       let source = try dataSource("\(path).source", try req(path, f, "source"))
       let pipeline = try pipelineSteps("\(path).pipeline", try req(path, f, "pipeline"))
-      var params: [TransformParam]? = nil
-      if let v = f["params"] {
-        // Lenient AI-ingest (§3.6): a `{name: <Binding>}` MAP is accepted
-        // alongside the canonical `[{from, name}]` array — normalised sorted
-        // by name (the reference host's map iteration order).
-        if case .object(let mapFields) = v {
-          params = try mapFields.sorted { $0.key < $1.key }.map { (name, fromJ) in
-            TransformParam(
-              name: name, from: try binding("\(path).params.\(name).from", fromJ))
-          }
-        } else {
-          let items = try array("\(path).params", v)
-          params = try items.map { item in
-            let pf = try object("\(path).params[]", item)
-            return TransformParam(
-              name: try reqString("\(path).params[]", pf, "name"),
-              from: try binding("\(path).params[].from", try req("\(path).params[]", pf, "from"))
-            )
-          }
-        }
+      return .transform(
+        params: try bindingParams(path, f), pipeline: pipeline, source: source)
+    // Phase 1534 (§3.3.2) — ONE scalar expression evaluated to ONE value. The
+    // expression is the SAME `ColExpr` algebra a `Transform` pipeline step
+    // carries, decoded by the same codec, so there is one algebra to specify,
+    // certify and teach rather than two that drift apart.
+    case "Expr":
+      let exprPath = "\(path).expr"
+      let e = try colExpr(exprPath, try req(path, f, "expr"))
+      // §21.8 — the evaluation bound, counted per EXPRESSION rather than per
+      // document. Its scope is this case and nothing else: a `ColExpr` inside a
+      // pipeline is deliberately not covered.
+      let nodes = countExprNodes(e)
+      if nodes > WireLimits.maxExprNodes {
+        throw err(
+          .limitExceeded, exprPath,
+          "expression carries \(nodes) nodes, above the \(WireLimits.maxExprNodes) a single "
+            + "Binding.Expr may hold")
       }
-      return .transform(params: params, pipeline: pipeline, source: source)
+      let exprParams = try bindingParams(path, f)
+      // The two refusals, both because an `Expr` HAS NO ROW. Left admitted,
+      // each would decode to an expression whose evaluation could only ever
+      // fail, once per render, on every host — so they are decode-time and
+      // unconditional rather than resolution-time.
+      if let offender = firstColReference(e) {
+        throw wrongType(
+          exprPath,
+          "no column reference — a Binding.Expr evaluates against its params alone and has no "
+            + "frame for '\(offender)' to read; the remedy is a different BINDING, not a "
+            + "different spelling, and Binding.Transform is the case that supplies the frame")
+      }
+      let bound = Set((exprParams ?? []).map { $0.name })
+      // Statically decidable HERE where it is not for `Transform`, whose
+      // unbound filter params are PRUNED under the deliberate "unset chip ⇒ no
+      // constraint" leniency: an `Expr` has no step to prune and no rows to
+      // fall back on, so an unbound reference has no value it could ever take.
+      if let unbound = firstUnboundParam(e, bound) {
+        throw wrongType(
+          exprPath,
+          "every referenced param to be bound by the binding's own params list — '\(unbound)' "
+            + "is not")
+      }
+      return .expr(expr: e, params: exprParams)
     case "Invoke":
       return .invoke(
         capabilityId: try reqString(path, f, "capabilityId"),
@@ -859,8 +961,20 @@ extension Decode {
         channel: try reqString(path, f, "channel"),
         payload: try jval("\(path).payload", try req(path, f, "payload")))
     // Field aliases: href (the dominant web name) / url / to → route.
+    //
+    // Phase 1536 — the route is a `TextSource`, so a tree can name a
+    // destination it computes from what the reader is looking at. The bare JSON
+    // string IS `Literal`'s canonical form, so every document written before
+    // the widening decodes exactly as it did — aliases included, since they
+    // resolve before the value is decoded. `target` is omitted at `Self`.
     case "Navigate":
-      return .navigate(route: try reqStringAliased(path, f, "route", ["href", "url", "to"]))
+      var navTarget = NavigateTarget.selfWindow
+      if let t = f["target"] {
+        navTarget = try bareEnum("\(path).target", t, "NavigateTarget")
+      }
+      return .navigate(
+        route: try reqTextSourceAliased(path, f, "route", ["href", "url", "to"]),
+        target: navTarget)
     case "SetState":
       // `oneOf: [required value, required valueFrom]` - a literal payload OR a binding
       // resolved at dispatch time, never both. Both-present is refused rather than settled
@@ -887,7 +1001,46 @@ extension Decode {
       let items = try array("\(path).ops", try req(path, f, "ops"))
       return .chain(try items.enumerated().map { try action("\(path).ops[\($0.0)]", $0.1) })
     case "CommitLocal": return .commitLocal(nodeId: try reqString(path, f, "nodeId"))
-    case "WriteToClipboard": return .writeToClipboard(text: try reqString(path, f, "text"))
+    // Phase 1126 — the payload is a `TextSource`; the bare string IS
+    // `Literal`'s canonical form, so the explicit envelope normalises down to
+    // it here as at every other text slot (§16). Never coerced from a non-text
+    // JSON value: a host reading the widening as "this member is now open"
+    // would put a JSON literal on the reader's clipboard.
+    case "WriteToClipboard": return .writeToClipboard(text: try reqTextSource(path, f, "text"))
+    // Phase 1124 — the payload-free print, and the ONE action arm strict about
+    // unrecognised members. Everywhere else in this format an unknown member is
+    // one the reading host has not learned yet, and dropping it is the
+    // forward-compatible answer; here there is nothing to learn, so accepting
+    // `{"$type":"Print","pageRange":"1-3"}` would leave the emitter believing
+    // it had constrained a printing it had not. The refusal names the offending
+    // member's own path, taking the FIRST in sorted order so which member is
+    // named is deterministic rather than a function of dictionary order.
+    case "Print":
+      let extras = f.keys.filter { $0 != "$type" }.sorted()
+      if let first = extras.first {
+        throw wrongType("\(path).\(first)", "no member beside $type — Print takes no payload")
+      }
+      return .print
+    // Phase 1537 — ask, then act. The DEPTH-ONE REFUSAL is the substance of
+    // this arm: a `Confirm` reachable from either continuation is refused, and
+    // the check walks the DECODED continuation rather than its immediate
+    // `$type`, so a nested confirm inside a `Chain` is caught by the same line
+    // that catches a bare one. A dialogue that answers a dialogue is a modal
+    // stack the reader cannot escape, and it says nothing one question does not.
+    case "Confirm":
+      let prompt = try reqTextSource(path, f, "prompt")
+      let onConfirm = try action("\(path).onConfirm", try req(path, f, "onConfirm"))
+      try refuseNestedConfirm(onConfirm, "\(path).onConfirm")
+      var onCancel: Action? = nil
+      if let c = f["onCancel"] {
+        let decoded = try action("\(path).onCancel", c)
+        try refuseNestedConfirm(decoded, "\(path).onCancel")
+        onCancel = decoded
+      }
+      return .confirm(prompt: prompt, onConfirm: onConfirm, onCancel: onCancel)
+    // Phase 1537 — a bare node id, the `CommitLocal` shape above. It addresses
+    // a node in THIS document, so there is nothing for a binding to compute.
+    case "Focus": return .focus(nodeId: try reqString(path, f, "nodeId"))
     case "ReadFileBody":
       return .readFileBody(
         fileRef: try reqString(path, f, "fileRef"),
@@ -900,12 +1053,105 @@ extension Decode {
     case let o:
       throw unknownCase(
         path, o,
-        "Dispatch | Call | Notify | Navigate | SetState | AiTool | Chain | CommitLocal | WriteToClipboard | ReadFileBody | Invoke"
+        "Dispatch | Call | Notify | Navigate | SetState | AiTool | Chain | CommitLocal | WriteToClipboard | Print | Confirm | Focus | ReadFileBody | Invoke"
       )
+    }
+  }
+
+  /// Phase 1537 — fail when a `confirm` is reachable from `action`.
+  /// Confirmation is bounded at ONE question: a dialogue that answers a
+  /// dialogue is a modal stack the reader cannot escape, and it expresses no
+  /// intent a single question does not.
+  ///
+  /// It walks the DECODED action rather than raw JSON, and descends `chain`,
+  /// because a chain is otherwise a hiding place — a check written against the
+  /// continuation's immediate `$type` passes a nested confirm one level down.
+  static func refuseNestedConfirm(_ a: Action, _ path: String) throws {
+    switch a {
+    case .confirm:
+      throw wrongType(
+        path,
+        "no Confirm inside another Confirm's continuation — confirmation is bounded at one "
+          + "question")
+    case .chain(let ops):
+      for (i, inner) in ops.enumerated() {
+        try refuseNestedConfirm(inner, "\(path).ops[\(i)]")
+      }
+    default: return
     }
   }
 
   static func reqAction(_ path: String, _ f: [String: JSON], _ key: String) throws -> Action {
     try action("\(path).\(key)", try req(path, f, key))
+  }
+
+  /// The `params` slot shared by `Binding.transform` and `Binding.expr` — ONE
+  /// decoder, because §3.3.2 makes it the SAME slot following the same rules,
+  /// and two copies would drift on the lenient form below.
+  ///
+  /// Lenient AI-ingest (§3.6): a `{name: <Binding>}` MAP is accepted alongside
+  /// the canonical `[{from, name}]` array — normalised to the array form sorted
+  /// by name (the reference host's map iteration order). Omitted when empty.
+  static func bindingParams(_ path: String, _ f: [String: JSON]) throws -> [TransformParam]? {
+    guard let v = f["params"] else { return nil }
+    if case .object(let mapFields) = v {
+      return try mapFields.sorted { $0.key < $1.key }.map { (name, fromJ) in
+        TransformParam(name: name, from: try binding("\(path).params.\(name).from", fromJ))
+      }
+    }
+    let items = try array("\(path).params", v)
+    return try items.map { item in
+      let pf = try object("\(path).params[]", item)
+      return TransformParam(
+        name: try reqString("\(path).params[]", pf, "name"),
+        from: try binding("\(path).params[].from", try req("\(path).params[]", pf, "from")))
+    }
+  }
+
+  /// Every direct sub-expression of `e`, so the three walks below share one
+  /// definition of the shape and cannot disagree about which arms recurse.
+  static func exprChildren(_ e: ColExpr) -> [ColExpr] {
+    switch e {
+    case .col, .param, .lit: return []
+    case .binary(_, let l, let r): return [l, r]
+    case .not(let x), .cast(_, let x), .isNull(let x): return [x]
+    case .coalesce(let xs): return xs
+    case .apply(_, let xs): return xs
+    case .caseExpr(let cases, let elseExpr):
+      return cases.flatMap { [$0.when, $0.then] } + [elseExpr]
+    case .inList(let subject, let items): return [subject] + items
+    case .inParam(let subject, _): return [subject]
+    }
+  }
+
+  /// The `ColExpr` node count of one expression — the subject of §21.8's
+  /// `maxExprNodes`, counted per EXPRESSION rather than per document.
+  static func countExprNodes(_ e: ColExpr) -> Int {
+    1 + exprChildren(e).reduce(0) { $0 + countExprNodes($1) }
+  }
+
+  /// The first `col` reference reachable in `e`, if any (§3.3.2 refusal 1).
+  static func firstColReference(_ e: ColExpr) -> String? {
+    if case .col(let name) = e { return name }
+    for child in exprChildren(e) {
+      if let found = firstColReference(child) { return found }
+    }
+    return nil
+  }
+
+  /// The first param name `e` references that `bound` does not carry, if any
+  /// (§3.3.2 refusal 2). `inParam`'s name is a param too — it is the LIST
+  /// spelling of the same reference, so leaving it out would admit an unbound
+  /// membership test through the one arm that reads a param without being one.
+  static func firstUnboundParam(_ e: ColExpr, _ bound: Set<String>) -> String? {
+    switch e {
+    case .param(let name) where !bound.contains(name): return name
+    case .inParam(_, let name) where !bound.contains(name): return name
+    default: break
+    }
+    for child in exprChildren(e) {
+      if let found = firstUnboundParam(child, bound) { return found }
+    }
+    return nil
   }
 }

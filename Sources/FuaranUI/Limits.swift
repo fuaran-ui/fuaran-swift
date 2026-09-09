@@ -58,6 +58,19 @@ public enum WireLimits {
   /// constant is not: a decoded tree is far larger in memory than the bytes that produced
   /// it.
   public static let maxNodes = 100_000
+
+  /// Maximum `ColExpr` nodes in ONE `Binding.expr` expression (§21.8).
+  ///
+  /// The other limits bound the SIZE of a document; this one bounds what a host
+  /// must EVALUATE, which is why it exists beside them rather than being
+  /// derived from them. Counted per expression rather than per document — a
+  /// tree may carry many `expr` bindings, each bounded here, with the whole
+  /// still bounded by `maxNodes`.
+  ///
+  /// Its scope is `Binding.expr` and nothing else: a `ColExpr` inside a
+  /// `Binding.transform` PIPELINE is deliberately not covered, because a
+  /// pipeline's cost is already bounded by its own rows and steps.
+  public static let maxExprNodes = 512
 }
 
 /// One decode call's §21 node-axis counters.

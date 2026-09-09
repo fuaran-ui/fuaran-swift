@@ -39,9 +39,14 @@ public struct SemanticStyle: Equatable, Sendable {
   public var weight: StyleWeight
   public var role: StyleRole
   public var voice: FontVoice
+  /// Phase 1472 — the one member of this record that is not presentational: it
+  /// declares the text DIRECTION, which is a fact about the content rather than
+  /// a style choice. Omitted at `auto` on both boundaries, like its siblings.
+  public var direction: TextDirection
 
   public static let `default` = SemanticStyle(
-    emphasis: .normal, tone: .default, weight: .standard, role: .none, voice: .default)
+    emphasis: .normal, tone: .default, weight: .standard, role: .none, voice: .default,
+    direction: .auto)
 
   public var isDefault: Bool { self == .default }
 }

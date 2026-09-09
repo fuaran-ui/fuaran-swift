@@ -27,11 +27,15 @@
 
 # ── Render obligations owed and unanswered (WIRE_FORMAT.md §13) ──────────────
 #
-# Both follow from vocabulary this surface does not model: `FileUpload` silently
-# drops `capture`, `destination`, `dropTarget` and `acceptPaste`; `Modal.modality`
-# is accepted permissively where the corpus pins a refusal. Each is reported by the
-# gate as "unchecked with no checker registered", which is the honest answer — not
-# checked is not passed, and silence is never an answer.
+# Both are reported by the gate as "unchecked with no checker registered", which
+# is the honest answer — not checked is not passed, and silence is never an answer.
+#
+# THEIR REASON CHANGED at Phase 1499 even though their status did not. It was
+# that this surface did not model the slots the claims are about; it models them
+# now — `FileUploadSpec` carries `capture`, `destination`, `dropTarget` and
+# `acceptPaste`, and `ModalSpec` carries `modality` — so what remains is exactly
+# what these two lines say on their face: nobody has written the checker. That is
+# still unadopted work and still not an exemption.
 #
 # Verified against wire-format-fixtures/render-fidelity.json (19 declared
 # obligations), the 15 registered `checkers` and the 2 `declaredExemptions`:
@@ -41,21 +45,19 @@
 
 # ── Reject vectors this decoder does not yet refuse ─────────────────────────
 #
-# UNRECORDED. `docs/RENDER-PROJECTION.md` states that ten reject vectors name this
-# surface's residue, and enumerates the CAUSES — form-field kinds `Tokens`,
-# `Rating` and `Color` unmodelled; `WriteToClipboard` widened from a bare string to
-# a text source, so a bound payload is refused as WRONG_TYPE; `FileUpload` dropping
-# `capture` / `destination` / `dropTarget` / `acceptPaste`; `Modal.modality` and
-# `SemanticStyle.direction` accepted permissively; the four print-break controls
-# unmodelled — but it does not name the ten fixture IDs, and deriving them requires
-# RUNNING the decoder against the corpus.
+# EMPTY, AND MEASURED — Phase 1499. This section was previously empty because the
+# landing machine had no Swift toolchain and the IDs could not be derived without
+# running the decoder; it is empty now because there are none. Every reject vector
+# in the shared corpus refuses with the pinned code at the pinned path, and
+# `testEveryRejectFixtureIsRefused` is what says so: it fails on any vector this
+# file does not name, so an empty section is a claim the suite re-checks on every
+# run rather than an omission.
 #
-# This section is therefore deliberately EMPTY rather than guessed at, and an empty
-# reject section is NOT a pass: `testEveryRejectFixtureIsRefused` behaves exactly as
-# it did before this file existed — every failing vector fails the test — and prints
-# the corrected `[reject]` lines, ready to paste here, so recording it is one run and
-# one copy on any machine with a Swift toolchain.
-#
-# The machine this landed from carries no Swift toolchain (constraint of the
-# dispatch), so writing IDs here would have committed an unverified artefact to a
-# gate whose entire purpose is that its contents are true.
+# The residue it recorded — the three form-field kinds, the widened clipboard
+# payload, the four `FileUpload` members, `Modal.modality`, `SemanticStyle.direction`
+# and the print-break controls — was adopted along with the rest of the vocabulary
+# the corpus had grown around it. Two of the closures were places this decoder
+# silently ACCEPTED a malformed document rather than failing to model a slot: the
+# integer slot truncated a fraction, and the JSON number grammar rested on Swift's
+# `Double(_:)`, which reads `03`, `3.`, `+1` and `inf` as perfectly ordinary
+# numbers. Both are checked directly now.

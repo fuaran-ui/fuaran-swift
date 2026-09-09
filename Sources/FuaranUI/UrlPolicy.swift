@@ -351,8 +351,17 @@ extension Action {
   /// The surface itself does not route a `Navigate` anywhere — it is handed to
   /// the embedding app, which is exactly why the app must floor it before
   /// turning it into an open call.
+  ///
+  /// Phase 1536 — the route is a `TextSource`, so only its LITERAL arm has a
+  /// destination a static classification can see. A bound route is `dynamic`
+  /// for the same reason a bound `href` is: the string the router receives is
+  /// resolved at dispatch, and §3.6.21 states the obligation as RESOLVE, THEN
+  /// GATE — classifying the declaration would consult the floor about a
+  /// template nobody navigates to while the string that matters went
+  /// unexamined.
   public var sanitizedNavigateRoute: SanitizedUrl? {
-    guard case .navigate(let route) = self else { return nil }
-    return FuaranUrlPolicy.classify(route)
+    guard case .navigate(let route, _) = self else { return nil }
+    guard case .literal(let text) = route else { return .dynamic }
+    return FuaranUrlPolicy.classify(text)
   }
 }

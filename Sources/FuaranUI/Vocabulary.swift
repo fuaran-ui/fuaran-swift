@@ -152,6 +152,18 @@ public enum IconSize: String, CaseIterable, Equatable, Sendable {
 }
 
 /// The unit a `Duration` cell format's raw value counts in.
+/// Phase 1533 — the resolution a `Binding.now` declares for the host-furnished
+/// instant. FOUR members and not `RelativeTimeUnit`'s seven, deliberately: this
+/// is a TRUNCATION of a calendar instant, and a week, a month or a year has no
+/// truncation every host agrees on (which weekday starts a week; which
+/// calendar). The four here truncate the canonical ISO-8601 form by prefix.
+public enum TimeGrain: String, CaseIterable, Equatable, Sendable {
+  case second = "Second"
+  case minute = "Minute"
+  case hour = "Hour"
+  case day = "Day"
+}
+
 public enum DurationUnit: String, CaseIterable, Equatable, Sendable {
   case seconds = "Seconds"
   case minutes = "Minutes"
@@ -180,6 +192,42 @@ public enum DateVariant: String, CaseIterable, Equatable, Sendable {
   case date = "Date"
   case time = "Time"
   case dateTime = "DateTime"
+}
+
+/// §3.6.11 — the modality a `Modal` declares. Omitted at `modal`, which is the
+/// blocking modality every pre-modality document meant.
+public enum ModalityKind: String, CaseIterable, Equatable, Sendable {
+  case modal = "Modal"
+  case popover = "Popover"
+}
+
+/// Phase 1472 — the node-level declared text direction (§3.1). Lower-case on
+/// the wire, like `LiveRegionKind` and `SortDirection`, because these are the
+/// HTML `dir` tokens themselves. Omitted at `auto`, which leaves the inherited
+/// direction in place — the pre-1472 rendering.
+public enum TextDirection: String, CaseIterable, Equatable, Sendable {
+  case auto = "auto"
+  case ltr = "ltr"
+  case rtl = "rtl"
+}
+
+/// Phase 1536 — `Action.navigate`'s destination window (§3.6.21). A CLOSED
+/// enum of two, deliberately not HTML's `target` attribute: that vocabulary
+/// also carries `_parent` and `_top`, which are frame-busting gestures a hosted
+/// tree must not be able to ask for, so `_blank` is refused rather than aliased
+/// — accepting any of it would teach an emitter the wrong vocabulary.
+public enum NavigateTarget: String, CaseIterable, Equatable, Sendable {
+  case selfWindow = "Self"
+  case blank = "Blank"
+}
+
+/// Phase 1116 — the recording device a `FileUpload` asks the platform for
+/// (§3.6.18). There is deliberately no display-capture case and there will not
+/// be one by widening this member: a screen capture reaches every window the
+/// reader has open rather than one device behind the picker.
+public enum CaptureSource: String, CaseIterable, Equatable, Sendable {
+  case camera = "Camera"
+  case microphone = "Microphone"
 }
 
 public enum FileReadEncoding: String, CaseIterable, Equatable, Sendable {

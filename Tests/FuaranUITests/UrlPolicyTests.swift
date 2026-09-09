@@ -122,10 +122,28 @@ final class UrlPolicyTests: XCTestCase {
 
   func testSanitizedNavigateRoute() {
     XCTAssertEqual(
-      Action.navigate(route: "/dashboard").sanitizedNavigateRoute, .allowed("/dashboard"))
-    guard case .rejected? = Action.navigate(route: "javascript:x").sanitizedNavigateRoute else {
+      Action.navigate(route: .literal("/dashboard"), target: .selfWindow).sanitizedNavigateRoute,
+      .allowed("/dashboard"))
+    guard
+      case .rejected? = Action.navigate(route: .literal("javascript:x"), target: .selfWindow)
+        .sanitizedNavigateRoute
+    else {
       return XCTFail("a javascript: route must be rejected")
     }
     XCTAssertNil(Action.dispatch.sanitizedNavigateRoute)
+  }
+
+  /// Phase 1536 — a BOUND route is `dynamic`, not rejected and not allowed.
+  /// §3.6.21's obligation is RESOLVE, THEN GATE: classifying the declaration
+  /// would consult the floor about a template nobody navigates to while the
+  /// string the router actually receives went unexamined. This is the same
+  /// answer a bound `href` already gets, and the test sits beside that one so
+  /// the pair reads as one rule rather than two coincidences.
+  func testSanitizedNavigateRouteIsDynamicForABoundRoute() {
+    let bound = Action.navigate(
+      route: .bound(.state(key: "route", defaultValue: .ast(.string("")))),
+      target: .blank)
+    XCTAssertEqual(bound.sanitizedNavigateRoute, SanitizedUrl.dynamic)
+    XCTAssertNil(bound.sanitizedNavigateRoute?.openable)
   }
 }

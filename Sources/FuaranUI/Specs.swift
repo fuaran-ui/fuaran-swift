@@ -600,6 +600,38 @@ public enum FormFieldKind: Equatable, Sendable {
   case dateRange(
     value: Binding, variant: DateVariant, min: String?, max: String?, step: Double?,
     onChange: Closure?)
+  /// Phase 1121 (§3.6.19) — SEVERAL values accumulated as removable chips, over
+  /// a suggestion set that may be open, searchable, asynchronous, or absent.
+  ///
+  /// Every member is optional, so `{"$type":"Tokens"}` is a complete document.
+  /// `allowFreeText` omits at **`true`** — the OPPOSITE polarity to `combobox`,
+  /// and the one thing about this case a host is most likely to get wrong:
+  /// `combobox`'s option source is REQUIRED so "constrained" is its resting
+  /// state, where `suggestions` is optional so "open" is this one's. The
+  /// default follows the required-ness of the set.
+  ///
+  /// `value` is a `Binding<string list>` and the list is ORDERED — chips appear
+  /// where the reader added them, so a host must not sort or de-duplicate it.
+  case tokens(
+    value: Binding, suggestions: Binding?, allowFreeText: Bool, onChange: Closure?)
+  /// Phase 1130 (§3.6.17) — a subjective score on a small ordinal scale. The
+  /// line against `rangedNumber` is who the number belongs to: a rating is a
+  /// judgement a person GIVES, a ranged number a measurement they REPORT.
+  ///
+  /// `max` is the case's only required member and is refused below 1 — a scale
+  /// with no positions has nothing to draw and no keystroke that could change
+  /// anything. `value` is a float even where nothing can type a fraction,
+  /// because the commonest rating a reader sees is an AVERAGE arriving through
+  /// a query. `allowHalf` governs ENTRY, never display.
+  case rating(value: Binding, max: Int, allowHalf: Bool, onChange: Closure?)
+  /// Phase 1130 (§3.6.17) — the platform's own colour picker. A CONTROL, not a
+  /// `rule.format`: a swatch that opens the operating system's picker, which no
+  /// format on a text field can produce.
+  ///
+  /// Both members optional. The value is `#rrggbb` and nothing else — the one
+  /// form a native colour input can hold or return — and case is PRESERVED
+  /// rather than normalised.
+  case color(value: Binding, onChange: Closure?)
 }
 
 /// The cross-field operand. `against` is a `Binding`, and that IS the
@@ -676,6 +708,25 @@ public struct FileUploadSpec: Equatable, Sendable {
   public var label: TextSource
   public var multiple: Bool
   public var disabled: Binding?
+  /// Phase 1115 — two ADDITIONAL ingress routes, never replacements for the
+  /// picker. Both omit at `false`, and the polarity is load-bearing: the
+  /// shortest upload document is the plain picker, which is what every document
+  /// written before that revision says.
+  public var dropTarget: Bool
+  public var acceptPaste: Bool
+  /// Phase 1116 (§3.6.18) — WHICH of the reader's own recording devices the
+  /// platform should open in place of the file browser. OPTIONAL rather than
+  /// omit-at-default: "say nothing" is a state of its own, because an upload
+  /// naming no device is asking for the file browser, which is not one of the
+  /// two devices wearing a default.
+  public var capture: CaptureSource?
+  /// Phase 1117 (§3.6.20) — the host-registered destination an upload streams
+  /// to. A NAME, and a name because it must never be an ADDRESS: a wire
+  /// document comes from an arbitrary emitter, and a URL here would let that
+  /// emitter choose where a reader's file goes. The empty string is REFUSED
+  /// rather than read as absence, which would silently turn an upload the
+  /// author meant to stream into a client-only one.
+  public var destination: String?
 }
 
 // ── Visualisation specs ──────────────────────────────────────────────────────
@@ -748,6 +799,56 @@ public struct GridSpec: Equatable, Sendable {
   /// Rows per page. The schema pins `minimum: 1` - a zero page size paginates nothing.
   public var pageSize: Int?
   public var defaultSort: DefaultSort?
+  /// Phase 1473 — the paginated-media pair, on `Box`'s terms.
+  public var keepRowsTogether: Bool
+  public var repeatHeader: Bool
+  /// Phase 1123 — this grid's rows may be taken out of the page as a file.
+  /// Omitted at `false`.
+  public var exportable: Bool
+  /// Phase 1125 — the two sides of ONE shared State key. A grid declaring
+  /// `transferOutKey` K may RELEASE rows onto K; one declaring `transferInKey`
+  /// K ACCEPTS rows arriving on it. Separate decoder arms, and the corpus
+  /// vectors them separately for that reason.
+  public var transferInKey: String?
+  public var transferOutKey: String?
+}
+
+/// Phase 1491 (§4l) — an annotation's x address: a CATEGORY key read under the
+/// categorical scale, and an ISO-8601 `Date` read under `Temporal`.
+///
+/// Its own type rather than two inline fields, because a range band addresses an
+/// x-axis interval with a PAIR of these.
+public enum ChartAnnotationX: Equatable, Sendable {
+  case category(key: String)
+  case date(iso: String)
+}
+
+/// Phase 1492 (§4l) — a `rangeBand`'s PAIR: two of the same address form, on one
+/// axis.
+///
+/// THE AXIS IS THE CASE. §4l requires a band to declare which axis it sits on;
+/// carrying that as a separate flag beside an untyped pair would admit a
+/// document declaring the value axis and addressing it with two category keys.
+/// The union tag declares the axis AND types the pair with it, so that document
+/// cannot be written by any conformant emitter.
+public enum ChartAnnotationRange: Equatable, Sendable {
+  case valueRange(from: Double, to: Double)
+  case xRange(from: ChartAnnotationX, to: ChartAnnotationX)
+}
+
+/// Phase 1490 (§4l) — a chart's data-addressed annotation. An annotation names a
+/// place in the DATA's coordinates and, optionally, a label; it carries no
+/// geometry and no style at all, which is what makes it survive a data change, a
+/// theme flip, a restyle and a resize.
+public enum ChartAnnotation: Equatable, Sendable {
+  /// A horizontal line at `value` in the VALUE axis's own units.
+  case referenceLine(value: Double, label: TextSource?)
+  /// A VERTICAL line at an x address — the reference line mirrored across the
+  /// axes.
+  case eventMarker(at: ChartAnnotationX, label: TextSource?)
+  /// A shaded interval on either axis, and the one member that draws BEHIND
+  /// every series.
+  case rangeBand(range: ChartAnnotationRange, label: TextSource?)
 }
 
 public struct ChartSpec: Equatable, Sendable {
@@ -758,6 +859,8 @@ public struct ChartSpec: Equatable, Sendable {
   public var yFields: [String]
   public var title: TextSource?
   public var onPointClick: Closure?
+  /// Phase 1490 — omitted when the chart declares none.
+  public var annotations: [ChartAnnotation]?
 }
 
 public struct MapSpec: Equatable, Sendable {
@@ -786,6 +889,11 @@ public struct BoxSpec: Equatable, Sendable {
   public var heading: TextSource?
   public var layout: BoxLayout
   public var role: BoxRole
+  /// Phase 1473 — the print-break controls. Both omit at `false`, and both are
+  /// declarations about PAGINATED media alone: a screen host reads them and
+  /// emits nothing.
+  public var breakBefore: Bool
+  public var keepTogether: Bool
 }
 
 public struct SplitPanelSpec: Equatable, Sendable {
@@ -834,6 +942,12 @@ public struct ModalSpec: Equatable, Sendable {
   public var open: Binding
   public var onDismiss: Action?
   public var heading: TextSource?
+  /// §3.6.11 — omitted at `modal`, which is the blocking modality every
+  /// pre-modality document meant. A present value outside the two is
+  /// `UNKNOWN_DU_CASE` and a non-string is `WRONG_TYPE`; neither falls back,
+  /// because a document asking for a popover and getting a blocking modal has
+  /// been answered with a different affordance.
+  public var modality: ModalityKind
 }
 
 public struct ScrollAreaSpec: Equatable, Sendable {
@@ -864,8 +978,34 @@ public struct ErrorBoundarySpec: Equatable, Sendable {
   public var fallback: Node
 }
 
+/// Phase 1535 — the two spellings of a case's condition. They interleave freely
+/// in one ordered `cases` array, and first-match-wins runs over the array in
+/// AUTHORED order: a host evaluates case *n* fully before considering case
+/// *n+1*, and must not batch all the matches ahead of all the predicates.
+public enum SwitchCondition: Equatable, Sendable {
+  /// Compares the switch's resolved selector against a literal string.
+  case match(String)
+  /// Evaluates a `Binding<bool>` and takes the case on a RESOLVED `true` only —
+  /// a resolved `false`, an unresolved binding and an errored one all fall
+  /// through. There is no truthiness rule: `0`, `""` and `"false"` are refused
+  /// by the coercion rather than read as `false`.
+  ///
+  /// It consults no selector at all, so a switch whose cases are ALL predicates
+  /// needs no `on` and has no state key for anything to write.
+  case when(Binding)
+}
+
 public struct SwitchCase: Equatable, Sendable {
-  public var matchValue: String
+  /// EXACTLY ONE of `match` and `when` is present (§3.6) — both together and
+  /// neither at all are decode errors, the same shape and the same reasoning as
+  /// `setState`'s `value` / `valueFrom` pair.
+  ///
+  /// A case naming no condition is not a case that never matches; it is a
+  /// document whose author meant something the wire cannot say, and a host that
+  /// silently skipped it would render the `default` and report nothing. A
+  /// precedence rule for "both" would have to be specified, agreed on every
+  /// host and remembered by every author, for a document nobody meant to write.
+  public var condition: SwitchCondition
   public var child: Node
 }
 
@@ -877,6 +1017,16 @@ public struct SwitchSpec: Equatable, Sendable {
   public var cases: [SwitchCase]
   public var defaultChild: Node
   public var on: Binding?
+  /// Phase 1122 — the timed carousel: advance to the next case every
+  /// this-many milliseconds, omitted at absence. It declares the one fact a
+  /// host cannot recover from the tree — every other half of a carousel was
+  /// already composable, and nothing in any arrangement of those says a timer
+  /// exists.
+  ///
+  /// A DURATION, never a flag. Non-positive and fractional values are REFUSED
+  /// rather than canonicalised: `0` is what an emitter reaches for to mean
+  /// "off" and the language already has a spelling for off, an absent key.
+  public var autoAdvanceMs: Int?
 }
 
 public enum HoleValueSpace: Equatable, Sendable {

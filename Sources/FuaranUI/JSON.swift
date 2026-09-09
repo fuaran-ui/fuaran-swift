@@ -236,6 +236,16 @@ private struct JSONParser {
         case "u": out.append(try parseUnicodeEscape())
         default: throw err("invalid escape '\\\(e)'")
         }
+      // §20.2 row 5 — a raw C0 control character inside a string is
+      // INVALID_JSON. RFC 8259 requires it escaped, and accepting the raw byte
+      // is the leniency that lets a tab or a newline ride through a slot every
+      // host then renders differently.
+      case let c where c.value < 0x20:
+        throw err(
+          String(
+            format:
+              "a raw control character U+%04X inside a string (WIRE_FORMAT.md §20.2 row 5) — "
+              + "it must be escaped", c.value))
       default:
         out.append(c)
       }
@@ -337,10 +347,59 @@ private struct JSONParser {
     return try finishNumber(from: start)
   }
 
+  /// §20.2 — the JSON number GRAMMAR, checked before `Double` is asked to
+  /// parse. `Double(_:)` is deliberately not the oracle here: Swift's
+  /// initialiser accepts `03`, `3.`, `.5`, `+1`, `0x1p3`, `inf` and `nan`, none
+  /// of which is a JSON number, so a parser resting on it admits documents the
+  /// specification refuses — silently, since every one of them yields a
+  /// perfectly ordinary `Double`.
+  ///
+  /// The grammar is RFC 8259's: an optional `-`, then either `0` or a non-zero
+  /// digit followed by digits, then an optional `.` with at least one digit,
+  /// then an optional exponent with an optional sign and at least one digit.
   private func finishNumber(from start: Int) throws -> Double {
     let text = String(String.UnicodeScalarView(scalars[start..<i]))
+    guard Self.isJSONNumber(text) else { throw err("invalid number '\(text)'") }
     guard let d = Double(text) else { throw err("invalid number '\(text)'") }
     return d
+  }
+
+  static func isJSONNumber(_ text: String) -> Bool {
+    var s = Array(text.utf8)[...]
+    func digits() -> Int {
+      var n = 0
+      while let c = s.first, c >= 48, c <= 57 {
+        s = s.dropFirst()
+        n += 1
+      }
+      return n
+    }
+    if s.first == UInt8(ascii: "-") { s = s.dropFirst() }
+    // The integer part: `0` alone, or a non-zero digit and any digits after it.
+    // This is the clause that refuses `03` — a leading zero is not a spelling
+    // of three, it is a document this format does not have.
+    guard let lead = s.first else { return false }
+    if lead == UInt8(ascii: "0") {
+      s = s.dropFirst()
+    } else if lead >= 49, lead <= 57 {
+      _ = digits()
+    } else {
+      return false
+    }
+    // The fraction: a `.` must be followed by at least one digit, which is what
+    // refuses `3.`.
+    if s.first == UInt8(ascii: ".") {
+      s = s.dropFirst()
+      if digits() == 0 { return false }
+    }
+    if let e = s.first, e == UInt8(ascii: "e") || e == UInt8(ascii: "E") {
+      s = s.dropFirst()
+      if let sign = s.first, sign == UInt8(ascii: "+") || sign == UInt8(ascii: "-") {
+        s = s.dropFirst()
+      }
+      if digits() == 0 { return false }
+    }
+    return s.isEmpty
   }
 }
 

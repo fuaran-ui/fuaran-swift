@@ -490,6 +490,18 @@ develops on discovering it in production.
   with the pinned code at the pinned path**, so `conformance-residue.txt` carries
   no reject line at all.
 
+  **The RENDER half of that adoption landed separately, and the gap is worth
+  recording.** Phase 1499 widened the model and the decoder and did not carry the
+  widening into the SwiftUI floor, which is compiled only on macOS — so the
+  sentence above was true of the decoder and silently false of the renderer, and
+  the only thing that said so was a red `swift build` in CI. The three form-field
+  arms (`.tokens` chips in authored order, `.rating` pips over its scale,
+  `.color` as the swatch its `#rrggbb` names) and the widened `Switch` case
+  selection (a literal `match` against a RESOLVED selector, a `when` predicate
+  taken on a resolved `true` only) are in the floor now. The lesson generalises:
+  a vocabulary claim made from the decoder's side is not a claim about this host
+  until the leg that cannot be built on the authoring machine has been run.
+
   Two strictness rules came with them and are worth naming, because both were
   places this host silently ACCEPTED a document the corpus refuses rather than
   merely failing to model one. The integer slot admits a finite number with no

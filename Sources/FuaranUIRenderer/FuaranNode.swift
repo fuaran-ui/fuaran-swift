@@ -439,14 +439,41 @@
   private struct RenderSwitch: View {
     let k: SwitchSpec
     let ctx: BindingContext
+
+    /// Phase 1535 — is this case taken, given the switch's resolved selector?
+    ///
+    /// Exhaustive over the two case spellings, and they consult DIFFERENT things. A
+    /// `match` compares a literal against the selector and is taken only when the
+    /// selector RESOLVED: an absent selector is not the empty string, so a switch with
+    /// no `on` and no state key must not fall into a `match("")` case. A `when`
+    /// consults no selector at all — which is why an all-predicate switch needs none —
+    /// and is taken on a RESOLVED `true` only, so a resolved `false`, an unresolved
+    /// binding and an errored one all fall through to the next case and ultimately to
+    /// `default`. `resolveBool` already answers `false` for all three.
+    private static func isTaken(
+      _ c: FuaranUI.SwitchCase, selector: String?, _ ctx: BindingContext
+    ) -> Bool {
+      switch c.condition {
+      case .match(let literal):
+        guard let selector else { return false }
+        return literal == selector
+      case .when(let predicate):
+        return ctx.resolveBool(predicate)
+      }
+    }
+
     var body: some View {
       // `on` is the more specific declaration and wins where both are present; the
       // decoder has already refused a Switch carrying neither, so the empty tail is
       // unreachable rather than a silent default-to-empty.
       let selector: FuaranUI.Binding? =
         k.on ?? k.stateKey.map { FuaranUI.Binding.state(key: $0, defaultValue: .stringOpt(nil)) }
-      let current = selector.map { ctx.resolve($0) } ?? ""
-      let chosen = k.cases.first { $0.matchValue == current }?.child ?? k.defaultChild
+      let current = selector.map { ctx.resolve($0) }
+      // First-match-wins in AUTHORED order: `first(where:)` evaluates case *n* fully
+      // before considering case *n+1*, which is the specified evaluation order — the
+      // matches must not be batched ahead of the predicates.
+      let chosen =
+        k.cases.first { Self.isTaken($0, selector: current, ctx) }?.child ?? k.defaultChild
       FuaranNode(chosen, ctx)
     }
   }
@@ -1091,8 +1118,8 @@
   ///   `FuaranHost.writeBack`.
   /// * **Inert by construction** — `.choice`, `.combobox`, `.date`, `.textArea`, `.range`,
   ///   `.rangedNumber` are `.disabled(true)` over a `.constant` binding, and `.segmentedChoice` /
-  ///   `.dateRange` are plain `Text`. The user cannot edit them at all, so there is no input to
-  ///   drop.
+  ///   `.dateRange` / `.tokens` / `.rating` / `.color` are plain `Text` and shapes. The user
+  ///   cannot edit them at all, so there is no input to drop.
   ///
   /// That second group is a **render floor, not the Kotlin defect class**. The sibling host had
   /// live, editable controls whose `onValueChange` updated a local buffer and never reached the
@@ -1202,7 +1229,84 @@
             Text(ctx.resolve(value)).font(.caption)
           }
         }
+      // §3.6.19 (Phase 1121) — SEVERAL values accumulated as chips. The list is
+      // ORDERED and a host must not sort or de-duplicate it, so the chips are shown in
+      // the order the resolved value carries them.
+      //
+      // INERT BY CONSTRUCTION: there is no entry field and no removal affordance, so
+      // nothing a reader types can be dropped. `allowFreeText` is SHOWN rather than
+      // enforced, on §3.6.9 obligation 4's reasoning — no static surface can enforce
+      // membership, and a claim inert markup cannot keep is worse than an honest
+      // absence. Note the polarity: it omits at `true` here, the OPPOSITE of
+      // `combobox`, so the hint appears on the RESTING shape of this case.
+      case .tokens(let value, _, let allowFreeText, _):
+        let chips = ctx.resolve(value).split(separator: ",").map {
+          $0.trimmingCharacters(in: .whitespaces)
+        }.filter { !$0.isEmpty }
+        let shown = chips.isEmpty ? ["—"] : chips
+        VStack(alignment: .leading, spacing: 2) {
+          Text(label + (allowFreeText ? " (free text)" : ""))
+            .font(.caption).foregroundStyle(.secondary)
+          HStack(spacing: 6) {
+            ForEach(shown.indices, id: \.self) { i in
+              Text(shown[i])
+                .font(.caption)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.gray.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+          }
+        }
+      // §3.6.17 (Phase 1130) — a subjective score on a small ordinal scale. The score
+      // is a float even where nothing can type a fraction, because the commonest rating
+      // a reader sees is an AVERAGE arriving through a query — so the pips are filled
+      // against the resolved value and the number is printed beside them rather than
+      // rounded away.
+      //
+      // `allowHalf` is deliberately NOT read: it governs ENTRY, never display, and this
+      // floor has no entry. Showing it would be a claim about a control that is not here.
+      case .rating(let value, let maxV, _, _):
+        let score = ctx.resolveFloat(value, 0)
+        let positions = max(maxV, 1)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(label).font(.caption).foregroundStyle(.secondary)
+          HStack(spacing: 3) {
+            ForEach(0..<positions, id: \.self) { i in
+              Circle()
+                .fill(Double(i) + 1 <= score ? Color.gray.opacity(0.65) : Color.gray.opacity(0.18))
+                .frame(width: 8, height: 8)
+            }
+            Text("\(numberString(score)) / \(positions)")
+              .font(.caption).foregroundStyle(.secondary)
+          }
+        }
+      // §3.6.17 (Phase 1130) — the platform's own colour picker. This floor has no
+      // picker to open, so it renders the one thing it can render faithfully: the
+      // swatch the value names, beside the value itself. The value is `#rrggbb` and
+      // case is PRESERVED rather than normalised, so the hex is printed as authored.
+      case .color(let value, _):
+        let hex = ctx.resolve(value)
+        labelled(label) {
+          HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 3)
+              .fill(swatch(hex))
+              .frame(width: 14, height: 14)
+              .overlay(
+                RoundedRectangle(cornerRadius: 3).stroke(Color.gray.opacity(0.35), lineWidth: 1))
+            Text(hex.isEmpty ? "—" : hex).font(.caption)
+          }
+        }
       }
+    }
+
+    /// The colour a `#rgb` / `#rrggbb` value names, or a neutral placeholder where it
+    /// names no literal colour. Reuses the drawing surface's parser and its honesty
+    /// rule: inventing a colour for a value this surface cannot read would be a claim
+    /// about the document rather than a rendering of it.
+    private func swatch(_ value: String) -> Color {
+      guard let rgb = parseDrawColour(value) else { return Color.gray.opacity(0.18) }
+      return Color(red: rgb.red, green: rgb.green, blue: rgb.blue)
     }
 
     @ViewBuilder private func labelled(_ label: String, @ViewBuilder _ control: () -> some View)

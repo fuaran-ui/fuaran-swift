@@ -128,6 +128,9 @@ private struct FixtureError: Error { let message: String }
 /// op-agnostic, so the op semantics are the session's concern.
 actor FixtureSession: FuaranTreeSession {
   private var current: String
+  /// The `$state` slots a `setState` fixture op writes. Held so the fixture can
+  /// be asked what a reply op actually did, not only what it rendered.
+  private(set) var state: [String: String] = [:]
 
   /// What `projectResolved()` hands back — the stand-in for the Rust core's resolved
   /// projection, in which every scalar `Binding.Transform` has been folded to the value
@@ -157,6 +160,20 @@ actor FixtureSession: FuaranTreeSession {
     case "replace":
       guard let node = op["node"] else { throw FixtureError(message: "replace missing node") }
       current = encodeJSON(node)
+    case "setState":
+      // The fixture's stand-in for the core's `SetState`: the slot's value
+      // becomes the tree's visible text, so an applied `SetState` is observable
+      // in the PROJECTION rather than only in a counter the fixture keeps. That
+      // is what makes the reply-channel test prove the thing it claims — that an
+      // event's consequences reach the screen — instead of proving only that a
+      // string was handed to a session.
+      guard let key = stringField(op, "key") else {
+        throw FixtureError(message: "setState missing key")
+      }
+      let value = stringField(op, "value") ?? ""
+      state[key] = value
+      current =
+        #"{"id":"root","kind":{"$type":"Markdown","text":{"$type":"Literal","text":"\#(value)"}}}"#
     case "reject":
       throw FixtureReject(
         code: stringField(op, "code") ?? "VALIDATION_REJECT", path: stringField(op, "path"))

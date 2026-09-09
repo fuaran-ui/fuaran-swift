@@ -77,7 +77,19 @@
     @Published public private(set) var tree: Node
 
     /// The last validator reject, or `nil` when the last write succeeded.
+    ///
+    /// "Last" means the last write IN SEQUENCE, which is a claim only the serial
+    /// queue below makes true — see `enqueue`.
     @Published public private(set) var lastError: Error?
+
+    /// The serial write queue every control interaction goes through. See
+    /// `WriteQueue.swift` — it lives outside the SwiftUI guard so the ordering
+    /// guarantee is asserted on every platform.
+    private let writes = SerialWriteQueue()
+
+    /// The outcome of each completed write, oldest first, capped at
+    /// `SerialWriteQueue.maxRecords`.
+    public var writeRecords: [WriteRecord] { writes.records }
 
     public init(session: any FuaranTreeSession, tree: Node) {
       self.session = session
@@ -127,12 +139,36 @@
 
     // ── FuaranActionSink (sync, for rendered controls) ───────────────────────
 
+    /// Dispatch a control action.
+    ///
+    /// It used to be a bare `Task { await self.dispatch(action) }`, which starts
+    /// every write CONCURRENTLY. Two consequences, and the second is the one
+    /// that reached a screen: the session applied them in whatever order the
+    /// runtime happened to schedule, so two edits to the same slot could land
+    /// backwards; and `lastError` was written by whichever finished LAST, so a
+    /// rejected write that started first and finished second latched its error
+    /// onto a later write that had been accepted — an error banner naming the
+    /// wrong interaction, or appearing after the thing it complained about had
+    /// already succeeded. Both are the queue's job now.
     public func send(_ action: Action) {
-      Task { await self.dispatch(action) }
+      writes.enqueue(.action) {
+        await self.dispatch(action)
+        // Read AFTER the work and while still serialised, so this is that
+        // write's own outcome and not a neighbour's.
+        return self.lastError
+      }
     }
 
     public func writeState(stateKey: String, value: JSON) {
-      Task { await self.writeBack(stateKey: stateKey, value: value) }
+      writes.enqueue(.state(key: stateKey)) {
+        await self.writeBack(stateKey: stateKey, value: value)
+        return self.lastError
+      }
+    }
+
+    /// Await every write enqueued so far — see `SerialWriteQueue.settled`.
+    public func writesSettled() async {
+      await writes.settled()
     }
 
     // ── Internals ────────────────────────────────────────────────────────────

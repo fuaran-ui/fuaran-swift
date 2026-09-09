@@ -96,6 +96,27 @@ final class GridCellLoweringTests: XCTestCase {
     XCTAssertEqual(formatCellValue("3.14159", .number(decimals: 2)), "3.14")
   }
 
+  /// The locale-invariance golden (Phase 1541), shared with the sibling Kotlin
+  /// surface.
+  ///
+  /// A formatted datum crosses the wire as TEXT and is compared, keyed and
+  /// re-parsed downstream — a grid column's tone map is keyed on the author's raw
+  /// value, and a golden is a literal — so `1234,50` is not a prettier spelling
+  /// of `1234.50`, it is a different string that stops matching. This surface was
+  /// already correct, because `String(format:)` is non-localised by default; the
+  /// golden LOCKS it, so that the obvious "improvement" of passing
+  /// `Locale.current` fails here rather than in a grid somewhere. The Kotlin twin
+  /// has to spell the same intent as `Locale.ROOT`, where the platform default
+  /// runs the other way.
+  func testNumericFormattingIsLocaleInvariant() {
+    XCTAssertEqual(formatCellValue("1234.5", .currency(code: "GBP")), "GBP 1234.50")
+    XCTAssertEqual(formatCellValue("0.125", .percent(decimals: 1)), "12.5%")
+    XCTAssertEqual(formatCellValue("12.3456", .significantDigits(digits: 3)), "12.3")
+    // The clock spelling is the same claim at a different call site: `%02d` under
+    // a locale with its own digit shapes must still be ASCII digits and colons.
+    XCTAssertEqual(formatDuration(3900, .seconds, .clock), "01:05:00")
+  }
+
   func testNonNumericTextIsLeftAlone() {
     // A currency format over a string cell must not mangle it — the format is a
     // numeric rendering, and there is no number here.

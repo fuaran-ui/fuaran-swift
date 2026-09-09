@@ -249,7 +249,7 @@ func formatDuration(_ raw: Double, _ unit: DurationUnit, _ style: DurationStyle)
   let s = total % 60
   switch style {
   case .clock:
-    return String(format: "%02d:%02d:%02d", h, m, s)
+    return String(format: "%02d:%02d:%02d", locale: nil, h, m, s)
   case .compact:
     var parts: [String] = []
     if h > 0 { parts.append("\(h)h") }
@@ -266,14 +266,28 @@ func formatDuration(_ raw: Double, _ unit: DurationUnit, _ style: DurationStyle)
   }
 }
 
+// **Every numeric rendering here passes `locale: nil` EXPLICITLY, and the
+// explicitness is the point (Phase 1541).** A formatted datum crosses the wire
+// as text and is compared, keyed and re-parsed downstream — a column's tone map
+// is keyed on the author's raw value, a test's golden is a literal — so a
+// decimal comma is not a presentation preference here, it is a different string.
+// `String(format:)` is already non-localised when no locale is given, so this
+// changes no output; what it changes is that the invariance is now STATED at the
+// call site rather than resting on a default, and the obvious "improvement" —
+// passing `Locale.current` so numbers look native — is now visibly a decision
+// someone would have to make rather than an omission they could fall into. The
+// sibling Kotlin surface has to spell the same intent as `Locale.ROOT`, where the
+// default runs the other way and the omission is a live defect; the two now agree
+// by construction. Localisation of a DISPLAYED number belongs to the wire's own
+// `Format` binding with its declared locale, not to this floor.
 func formatCellValue(_ text: String, _ format: CellFormat) -> String {
   guard let n = Double(text) else { return text }
   switch format {
   case .none, .date, .custom: return text
-  case .number(let decimals): return String(format: "%.\(decimals ?? 0)f", n)
-  case .currency(let code): return "\(code) \(String(format: "%.2f", n))"
-  case .percent(let decimals): return String(format: "%.\(decimals ?? 0)f%%", n * 100)
-  case .significantDigits(let digits): return String(format: "%.\(digits)g", n)
+  case .number(let decimals): return String(format: "%.\(decimals ?? 0)f", locale: nil, n)
+  case .currency(let code): return "\(code) \(String(format: "%.2f", locale: nil, n))"
+  case .percent(let decimals): return String(format: "%.\(decimals ?? 0)f%%", locale: nil, n * 100)
+  case .significantDigits(let digits): return String(format: "%.\(digits)g", locale: nil, n)
   case .duration(let unit, let style): return formatDuration(n, unit, style)
   // Relative time needs a REFERENCE instant to be relative to, which is host state
   // (`Binding.now`), not something this pure formatter holds. Rendering the raw count

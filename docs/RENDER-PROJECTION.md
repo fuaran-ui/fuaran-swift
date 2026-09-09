@@ -402,6 +402,61 @@ clicked row of a named grid), which the dispatch seam does not carry. Leaving it
 unapplied is the honest answer; writing a placeholder would put a wrong value
 under a right-looking key.
 
+**Writes are SERIALISED, one in flight, FIFO** (Phase 1541). Each control
+interaction is appended to a `SerialWriteQueue` rather than started as its own
+`Task`. Two things were wrong without it, and the second reached a screen: the
+session applied writes in whatever order the runtime happened to schedule, so two
+edits to one slot could land backwards; and `lastError` was written by whichever
+write finished LAST, so a rejected write that started first and finished second
+attributed its error to a later write that had been accepted. `writeRecords`
+keeps each write's own outcome in call order — a single latched error cannot
+distinguish a reject-then-success from the reverse — capped at
+`SerialWriteQueue.maxRecords`, and `writesSettled()` is what makes the ordering
+awaitable rather than sleep-and-hope.
+
+The queue lives **outside** `#if canImport(SwiftUI)`, in `WriteQueue.swift`, for
+the reason the accessibility and trend-sentiment projections do: ordering is a
+decision, not an Apple detail, and a decision testable on only one platform is a
+decision nobody re-checks. `FuaranHost` is an `ObservableObject` and cannot leave
+the guard; the guarantee it rests on can.
+
+### The server-driven transport — bounded, streaming, and typed
+
+`FuaranUIDriver`'s op stream is consumed **incrementally**: `openOpLineStream()`
+yields each newline-delimited op as it arrives, so an op renders when it arrives
+rather than when the stream ends. A live SDUI stream is open for as long as the
+screen is, so the buffered form rendered nothing at all from one — which is why
+the acceptance test runs against a stream that never ends. The buffered
+`openOpStream()` remains on the seam, deprecated in its doc comment, because it
+is the cheapest thing for a fixture or a finite replay to implement.
+
+Three properties of that path are stated, not assumed:
+
+- **Two explicit caps, `OpStreamBounds`** — 1 MiB per op line, 64 MiB per body,
+  values rather than constants because what a host will read is a deployment
+  decision. A server-driven client applies whatever the server sends, so the op
+  stream is the one place it reads an unbounded amount of attacker-influenced
+  input. A breach is refused BY NAME: a typed `.lineCapExceeded` /
+  `.bodyCapExceeded` whose message carries the limit, reaching the driver as
+  `.fatal`.
+- **A non-`https` base URL is refused** unless `allowInsecure: true` is passed —
+  a typed refusal, never a silent downgrade and never a silent upgrade. Loopback
+  (`localhost`, `127.0.0.1`, `::1`) is exempt without the flag, because requiring
+  a certificate for a development fixture server is how an opt-in becomes a
+  permanent default.
+- **An event has consequences.** `postEventApplyingReply` applies the server's
+  reply ops through the same apply-then-project path the stream uses, surviving a
+  reject with the last-good tree exactly as `run` does. `postEventOps` defaults to
+  the EMPTY sequence rather than to the response body: a server answering with an
+  acknowledgement has not implemented a reply channel, and applying `{"ok":true}`
+  as a `TreeOp` would turn every successful event into a validator reject.
+
+The streaming reader is built on `URLSessionDataDelegate`, **not**
+`URLSession.bytes(for:)` — that API is Apple-Foundation only, and a
+`#if canImport(Darwin)` fallback would have left one public seam streaming on
+Darwin and buffering on every other platform, which is the platform nobody
+develops on discovering it in production.
+
 ## What is pending — stated plainly
 
 - **Five capabilities of the platform-baseline wave ARE adopted** — media text

@@ -44,7 +44,11 @@ import XCTest
             columns: columns, editable: false, source: .query(name: "rows", dependsOn: []),
             onRowClick: nil, rowKey: nil, rowKeyField: "status", staticRows: nil,
             sortStateKey: nil, pageStateKey: nil, editStateKey: nil, pageSize: nil,
-            defaultSort: nil)))
+            defaultSort: nil,
+            // Phase 1499's widening. All three at their omitted-at defaults: this fixture
+            // exists to walk every CELL arm, and pagination / export say nothing about
+            // which cell arm a column takes.
+            keepRowsTogether: false, repeatHeader: false, exportable: false)))
     }
 
     private func rows(_ values: [String]) -> ResolvedRows {

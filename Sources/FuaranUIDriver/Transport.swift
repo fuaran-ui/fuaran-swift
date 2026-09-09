@@ -87,17 +87,36 @@ public struct OpStreamBounds: Sendable, Equatable {
   /// a stream that never ends, not to ration ordinary use.
   public static let defaultMaxBodyBytes = 64 << 20
 
+  /// 120 seconds, matching the sibling Kotlin surface's idle budget.
+  ///
+  /// A server-driven stream is idle whenever the screen is idle, which is most of the time, so this
+  /// is the point at which silence stops meaning "nothing happened" and starts meaning "nothing is
+  /// coming".
+  public static let defaultIdleTimeout: TimeInterval = 120
+
   /// The largest single newline-delimited op this stream will assemble.
   public let maxLineBytes: Int
   /// The largest total body this stream will read before refusing.
   public let maxBodyBytes: Int
+  /// How long the stream may produce NO bytes before the request is given up on.
+  ///
+  /// `URLRequest.timeoutInterval` is an INTER-PACKET idle limit for a response that is still
+  /// arriving, not a deadline on the whole transfer — which is exactly the Kotlin twin's
+  /// `idleBudgetMillis`, so the two surfaces state the same policy in each platform's own terms.
+  /// It is set explicitly rather than left to Foundation's 60-second default, because a default is a
+  /// policy nobody chose: on the twin the equivalent default was 30 seconds and it killed healthy
+  /// sessions, which is the defect this phase closes there. A divergence between the two surfaces on
+  /// the one axis this phase is about would be residue.
+  public let idleTimeout: TimeInterval
 
   public init(
     maxLineBytes: Int = OpStreamBounds.defaultMaxLineBytes,
-    maxBodyBytes: Int = OpStreamBounds.defaultMaxBodyBytes
+    maxBodyBytes: Int = OpStreamBounds.defaultMaxBodyBytes,
+    idleTimeout: TimeInterval = OpStreamBounds.defaultIdleTimeout
   ) {
     self.maxLineBytes = maxLineBytes
     self.maxBodyBytes = maxBodyBytes
+    self.idleTimeout = idleTimeout
   }
 
   public static let `default` = OpStreamBounds()
@@ -302,15 +321,13 @@ public struct URLSessionTransport: FuaranTransport {
     let configuration = self.session.configuration
 
     return AsyncThrowingStream { continuation in
-      var req: URLRequest
+      let req: URLRequest
       do {
-        req = URLRequest(url: try makeURL(opsPath))
+        req = try makeOpStreamRequest()
       } catch {
         continuation.finish(throwing: error)
         return
       }
-      req.httpMethod = "GET"
-      req.setValue("application/x-ndjson", forHTTPHeaderField: "Accept")
 
       let chunks = URLSessionChunkStream(
         request: req, configuration: configuration, label: opsPath)
@@ -340,6 +357,21 @@ public struct URLSessionTransport: FuaranTransport {
   }
 
   // ── Boundary helpers ────────────────────────────────────────────────────────
+
+  /// The `/ops` request, built where a test can inspect it.
+  ///
+  /// Separated out because the idle policy is a property of the REQUEST and there is no HTTP server
+  /// in Foundation to prove it against on every platform (this repo's driver tests already record
+  /// that limit, and drive the loop over an in-memory transport for the same reason). What can be
+  /// asserted without a socket is that the declaration is made and carries the bound — and a policy
+  /// nobody can check is one that quietly reverts to the platform default.
+  func makeOpStreamRequest() throws -> URLRequest {
+    var req = URLRequest(url: try makeURL(opsPath))
+    req.httpMethod = "GET"
+    req.setValue("application/x-ndjson", forHTTPHeaderField: "Accept")
+    req.timeoutInterval = bounds.idleTimeout
+    return req
+  }
 
   /// Split an already-buffered body into ops under the same bounds the streaming
   /// path applies, so the two forms cannot come to disagree about what is too

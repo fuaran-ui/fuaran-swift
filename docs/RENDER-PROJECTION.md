@@ -439,6 +439,16 @@ Three properties of that path are stated, not assumed:
   input. A breach is refused BY NAME: a typed `.lineCapExceeded` /
   `.bodyCapExceeded` whose message carries the limit, reaching the driver as
   `.fatal`.
+- **A declared idle budget.** `OpStreamBounds.idleTimeout` (120 s, matched to the
+  sibling Kotlin surface's) is set on the `/ops` request rather than left to
+  Foundation's 60-second default, because `timeoutInterval` is an inter-packet
+  limit for a response still arriving — the same policy the twin spells as
+  `idleBudgetMillis`. A server-driven stream is idle whenever the screen is, and
+  a default is a policy nobody chose: on the twin the equivalent default was 30
+  seconds and it killed healthy sessions. Foundation ships no HTTP server, so the
+  socket-level proof of idle survival lives on the Kotlin side (a fixture that
+  goes genuinely quiet for 35 s); what is checked here is that the declaration is
+  made and carries the bound.
 - **A non-`https` base URL is refused** unless `allowInsecure: true` is passed —
   a typed refusal, never a silent downgrade and never a silent upgrade. Loopback
   (`localhost`, `127.0.0.1`, `::1`) is exempt without the flag, because requiring

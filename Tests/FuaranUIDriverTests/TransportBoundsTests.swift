@@ -96,6 +96,27 @@ final class TransportBoundsTests: XCTestCase {
     XCTAssertEqual(ops, ["{\"a\":1}", "{\"b\":2}"], "blank lines dropped, tail without a newline kept")
   }
 
+  // ── The idle policy ────────────────────────────────────────────────────────
+
+  /// An SDUI stream is idle whenever the screen is idle, so the request must not carry Foundation's
+  /// 60-second default: `timeoutInterval` is an INTER-PACKET limit for a response still arriving,
+  /// which is exactly the sibling Kotlin surface's `idleBudgetMillis`, and leaving it defaulted would
+  /// be the two surfaces disagreeing on the one axis this phase is about.
+  ///
+  /// There is no HTTP server in Foundation, so the socket-level proof lives on the Kotlin twin (a
+  /// fixture that genuinely goes quiet for 35 s). What is checkable here without a socket is that the
+  /// declaration is MADE and carries the bound — a policy nobody checks is one that quietly reverts.
+  func testTheOpStreamRequestCarriesTheIdleBudget() throws {
+    let transport = URLSessionTransport(baseURL: "https://example.test")
+    let req = try transport.makeOpStreamRequest()
+    XCTAssertEqual(req.timeoutInterval, OpStreamBounds.defaultIdleTimeout)
+    XCTAssertEqual(OpStreamBounds.defaultIdleTimeout, 120, "matched to the Kotlin twin's budget")
+
+    let patient = URLSessionTransport(
+      baseURL: "https://example.test", bounds: OpStreamBounds(idleTimeout: 600))
+    XCTAssertEqual(try patient.makeOpStreamRequest().timeoutInterval, 600, "and it is tunable")
+  }
+
   // ── The scheme gate ────────────────────────────────────────────────────────
 
   func testPlainHttpIsRefusedWithATypedErrorUnlessOptedIn() {

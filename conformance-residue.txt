@@ -32,26 +32,44 @@
 #
 # THEIR REASON CHANGED at Phase 1499 even though their status did not. It was
 # that this surface did not model the slots the claims are about; it models them
-# now — `FileUploadSpec` carries `capture`, `destination`, `dropTarget` and
-# `acceptPaste`, and `ModalSpec` carries `modality` — so what remains is exactly
-# what these two lines say on their face: nobody has written the checker. That is
-# still unadopted work and still not an exemption.
+# now — `FileUploadSpec` carries `capture`, `destination`, `dropTarget`,
+# `acceptPaste` and (Phase 1548) `maxBytes` / `maxFiles`, and `ModalSpec` carries
+# `modality` — so what remains is exactly what these two lines say on their face:
+# nobody has written the checker. That is still unadopted work and still not an
+# exemption.
 #
-# Verified against wire-format-fixtures/render-fidelity.json (19 declared
-# obligations), the 15 registered `checkers` and the 2 `declaredExemptions`:
-# 19 - 15 - 2 = these two. RENDER-PROJECTION.md states the same pair.
+# THE SET DID NOT GROW AT PHASE 1548, and that is worth saying because the
+# artefact did. `render-fidelity.json` gained a twentieth claim,
+# `FileUpload/ceiling-recorded-never-enforced`, and it is a DECLARED EXEMPTION
+# rather than a third line here: the claim is about a marker ATTRIBUTE on the
+# static no-script tier, and this surface emits no attribute bag and no document,
+# which is the structural test an exemption has to meet. The slots themselves are
+# modelled and the floor follows the same obligation's reasoning — record THAT a
+# ceiling was declared, never its value — pinned by UploadCeilingTests.swift.
+#
+# Verified against wire-format-fixtures/render-fidelity.json (20 declared
+# obligations), the 15 registered `checkers` and the 3 `declaredExemptions`:
+# 20 - 15 - 3 = these two. RENDER-PROJECTION.md states the same pair.
 [obligation] FileUpload/picker-always-present
 [obligation] Modal/aria-modal-only-when-blocking
 
 # ── Reject vectors this decoder does not yet refuse ─────────────────────────
 #
-# EMPTY, AND MEASURED — Phase 1499. This section was previously empty because the
-# landing machine had no Swift toolchain and the IDs could not be derived without
-# running the decoder; it is empty now because there are none. Every reject vector
-# in the shared corpus refuses with the pinned code at the pinned path, and
-# `testEveryRejectFixtureIsRefused` is what says so: it fails on any vector this
-# file does not name, so an empty section is a claim the suite re-checks on every
-# run rather than an omission.
+# EMPTY, AND MEASURED — Phase 1499, and STILL empty after Phase 1548. This
+# section was previously empty because the landing machine had no Swift toolchain
+# and the IDs could not be derived without running the decoder; it is empty now
+# because there are none. Every reject vector in the shared corpus refuses with
+# the pinned code at the pinned path, and `testEveryRejectFixtureIsRefused` is
+# what says so: it fails on any vector this file does not name, so an empty
+# section is a claim the suite re-checks on every run rather than an omission.
+#
+# Phase 1548 added four to the corpus — the wrong shape and the non-positive
+# value for each of `maxBytes` and `maxFiles` — and all four were accepted here
+# until the ceilings were modelled, which is what put them briefly on this
+# machine's run rather than on this list. The positivity floor is a DECODE RULE
+# (§3.6.23), and each refusal is asserted beside its corrected twin in
+# `UploadCeilingDecodeTests.swift`: a decoder that refused every ceiling outright
+# would satisfy all four vectors and be wrong in the more expensive direction.
 #
 # The residue it recorded — the three form-field kinds, the widened clipboard
 # payload, the four `FileUpload` members, `Modal.modality`, `SemanticStyle.direction`

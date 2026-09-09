@@ -727,6 +727,28 @@ public struct FileUploadSpec: Equatable, Sendable {
   /// rather than read as absence, which would silently turn an upload the
   /// author meant to stream into a client-only one.
   public var destination: String?
+  /// Phase 1548 (§3.6.23) — the declared ceilings: how large a file, and how
+  /// many of them, this control accepts.
+  ///
+  /// `maxBytes` is PER FILE rather than per selection. That is what makes it
+  /// meaningful on a single-file upload and what makes it the quantity a body
+  /// read can be measured against; a control bounding a whole multiple
+  /// selection states both members and the total it declares is
+  /// `maxBytes × maxFiles`. A per-selection sum would be a different quantity
+  /// wearing the same name.
+  ///
+  /// `maxFiles` is meaningful only alongside `multiple`, and beside
+  /// `"multiple":false` it is INERT — carried, not refused, because the bytes
+  /// describe a control every host renders identically with or without it, so
+  /// there is nothing for a decoder to be right about.
+  ///
+  /// Both are OPTIONAL and POSITIVE. Absent declares no ceiling, which is every
+  /// pre-1548 document exactly; `0` and below are refused at decode, because a
+  /// ceiling of zero is not a small ceiling but a control that can accept
+  /// nothing. `Int` here is §7.1's 32-bit slot, bounded by the strict integer
+  /// reader rather than by this type.
+  public var maxBytes: Int?
+  public var maxFiles: Int?
 }
 
 // ── Visualisation specs ──────────────────────────────────────────────────────

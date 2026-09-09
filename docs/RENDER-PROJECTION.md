@@ -512,11 +512,43 @@ develops on discovering it in production.
   `.5`, `+1`, `0x1p3`, `inf` and `nan` — none of them a JSON number, every one of
   them yielding a perfectly ordinary `Double`. A raw C0 control character inside
   a string is `INVALID_JSON` on the same rule.
+- **The declared upload ceilings are adopted (Phase 1548).** `FileUploadSpec`
+  carries `maxBytes` and `maxFiles` — both optional, both positive, both §7.1's
+  signed 32-bit slot — and the positivity floor is applied at DECODE, because
+  the format has no refined-integer type: `0` and below are `WRONG_TYPE` at the
+  member's own path, on the same line as an `SrcSetEntry` whose `width` is not
+  positive. A `maxFiles` beside `"multiple":false` is carried and **not**
+  refused: §3.6.23 makes it inert rather than malformed, and a host refusing it
+  would reject documents every other host accepts. Each of the corpus's four
+  refusals is asserted beside a corrected twin in `UploadCeilingDecodeTests`, so
+  the pair says where the boundary is rather than merely that something was
+  refused.
+
+  **The RENDER half withholds the values, deliberately.** This floor opens no
+  file picker, so it meets no selection: §3.6.23's obligations 1–3 have nothing
+  to act on here, and obligation 5 is vacuous. What it does instead is follow
+  obligation 4's reasoning — a tier that cannot act on a ceiling records only
+  THAT one was declared, never its number — so `uploadCeilingMarkers` projects
+  two value-free booleans and the arm renders a marker line built from those
+  alone. An upload declaring neither ceiling renders exactly as it did before
+  the revision: the marker line is absent, not empty. `UploadCeilingTests` pins
+  it, including the one assertion that can actually fail — that no digit ever
+  reaches the marker.
 - **The render-obligation roster is short by two claims**, down from nine. The
-  artefact declares nineteen; this surface registers fifteen checkers and two
+  artefact declares twenty; this surface registers fifteen checkers and three
   declared exemptions. The two that remain — `FileUpload/picker-always-present`
   and `Modal/aria-modal-only-when-blocking` — report as *unchecked with no checker
   registered*, and they are deliberately left that way rather than exempted.
+
+  **The twentieth claim arrived with Phase 1548 and is the third EXEMPTION.**
+  `FileUpload/ceiling-recorded-never-enforced` is about a marker *attribute* on
+  the static no-script tier, and this surface emits no attribute bag and no
+  document — the same structural test `Image/alt-always-emitted` meets. Left
+  unanswered it would have been a regression against a residue file naming two
+  lines, and recording it as a third residue line would have been the wrong
+  answer for the wrong reason: the slots are modelled, so it is not unadopted
+  work. The exemption names the supporting tests, per the rule that an exemption
+  which asserts nothing is true and useless.
 
   **Their REASON changed with Phase 1499 even though their status did not, and
   the distinction is worth keeping straight.** It was that the surface did not

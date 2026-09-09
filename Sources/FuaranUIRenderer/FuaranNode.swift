@@ -145,8 +145,7 @@
     case .form(let k): return AnyView(RenderForm(k: k, ctx: ctx))
     case .filters(let items): return AnyView(RenderFilters(items: items, ctx: ctx))
     case .button(let k): return AnyView(RenderButton(k: k, ctx: ctx))
-    case .fileUpload(let k):
-      return AnyView(Button(ctx.resolveText(k.label)) {}.disabled(ctx.resolveBool(k.disabled)))
+    case .fileUpload(let k): return AnyView(RenderFileUpload(k: k, ctx: ctx))
     case .select(let k): return AnyView(RenderSelect(k: k, ctx: ctx))
     // Visualisation
     case .dataGrid(let k): return AnyView(RenderDataGrid(k: k, nodeId: node.id, ctx: ctx))
@@ -1376,6 +1375,29 @@
     var body: some View {
       Button(ctx.resolveText(k.label)) { sink?.send(k.onClick) }.disabled(
         ctx.resolveBool(k.disabled))
+    }
+  }
+
+  /// The upload floor: a labelled, disabled-aware button and NO file picker.
+  ///
+  /// Phase 1548 — the two declared ceilings reach the render as VALUE-FREE
+  /// read-markers, never as numbers. `UploadCeilings.swift` carries the whole
+  /// reasoning; the short form is that this arm opens no picker, so it enforces
+  /// nothing, and a control captioned `max 5 MB` beside a button that admits no
+  /// file at all would promise a bound that is not there. An upload declaring
+  /// neither ceiling renders exactly as it did before this revision — the marker
+  /// line is absent, not empty.
+  private struct RenderFileUpload: View {
+    let k: FileUploadSpec
+    let ctx: BindingContext
+    var body: some View {
+      let markers = uploadCeilingMarkers(k)
+      VStack(alignment: .leading, spacing: 1) {
+        Button(ctx.resolveText(k.label)) {}.disabled(ctx.resolveBool(k.disabled))
+        if let summary = markers.summary {
+          Text(summary).font(.caption).foregroundStyle(.secondary)
+        }
+      }
     }
   }
 

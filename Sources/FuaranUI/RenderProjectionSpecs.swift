@@ -891,7 +891,39 @@ extension Decode {
       dropTarget: try optBool(path, f, "dropTarget") ?? false,
       acceptPaste: try optBool(path, f, "acceptPaste") ?? false,
       capture: captureV,
-      destination: destinationV)
+      destination: destinationV,
+      // Phase 1548 — the two declared ceilings. `maxFiles` is NOT cross-checked
+      // against `multiple`: beside `"multiple":false` the member is INERT by
+      // specification, and a host refusing it would reject documents every
+      // other host accepts, which is the divergence a declared ceiling exists
+      // to remove.
+      maxBytes: try optPositive(
+        path, f, "maxBytes",
+        "a positive per-file byte ceiling — a ceiling of zero is not a small ceiling but an "
+          + "upload that can accept no file at all, and an absent member is already the spelling "
+          + "for no ceiling"),
+      maxFiles: try optPositive(
+        path, f, "maxFiles",
+        "a positive selection-count ceiling — a multiple upload admitting zero files has no "
+          + "reachable selection, and an absent member is already the spelling for no ceiling"))
+  }
+
+  /// §3.6.23 — one OPTIONAL, POSITIVE integer ceiling, read at decode.
+  ///
+  /// The floor is a DECODE RULE rather than a type because this format has no
+  /// refined-integer type; it is the same rule `SrcSetEntry.width` and
+  /// `Switch.autoAdvanceMs` already stand on, and it is mirrored by
+  /// `minimum: 1` in the published JSON Schema so the two expressions of the
+  /// contract agree. The strict integer reader runs FIRST and refuses a
+  /// fraction, a §7 sentinel string and anything outside §7.1's signed 32-bit
+  /// slot, so what is left for this guard is the sign alone.
+  static func optPositive(
+    _ path: String, _ f: [String: JSON], _ key: String, _ expectation: String
+  ) throws -> Int? {
+    guard let v = f[key] else { return nil }
+    let n = try int("\(path).\(key)", v)
+    guard n >= 1 else { throw wrongType("\(path).\(key)", expectation) }
+    return n
   }
 
   // ── Visualisation specs ────────────────────────────────────────────────────

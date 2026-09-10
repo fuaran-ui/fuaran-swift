@@ -82,10 +82,8 @@ final class CorpusTests: XCTestCase {
   /// Locate the shared corpus relative to this source file:
   /// `<repo>/Tests/FuaranUITests/CorpusTests.swift` → `<repo>/../wire-format-fixtures`.
   static func corpusDir() -> URL? {
-    var isDir: ObjCBool = false
-    let exists = FileManager.default.fileExists(
-      atPath: expectedCorpusPath.path, isDirectory: &isDir)
-    return exists && isDir.boolValue ? expectedCorpusPath : nil
+    for candidate in corpusCandidates() where isWireCorpus(candidate) { return candidate }
+    return nil
   }
 
   static var repoRoot: URL {
@@ -97,6 +95,89 @@ final class CorpusTests: XCTestCase {
 
   static var expectedCorpusPath: URL {
     repoRoot.deletingLastPathComponent().appendingPathComponent("wire-format-fixtures")
+  }
+
+  /// The files that identify THIS corpus, as opposed to any other corpus in the estate.
+  ///
+  /// `manifest.json` alone identifies nothing: the wire corpus's own `sanitization/`,
+  /// `dag/` and `merge-conformance/` sub-corpora each carry one, and so does every other
+  /// specification corpus in the estate. A predicate that accepts any directory holding a
+  /// `manifest.json` therefore ACCEPTS a wrong corpus and fails downstream with "fixture X
+  /// is absent" — loud, and about the wrong thing.
+  static let corpusIdentityMarkers = ["manifest.json", "idl.json", "WIRE_FORMAT.md"]
+
+  static func missingMarkers(_ dir: URL) -> [String] {
+    corpusIdentityMarkers.filter {
+      !FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path)
+    }
+  }
+
+  static func isWireCorpus(_ dir: URL) -> Bool { missingMarkers(dir).isEmpty }
+
+  /// Raised when `FUARAN_CORPUS` names something that is not this corpus.
+  struct DeclaredCorpusRefused: Error { let message: String }
+
+  /// A root declared by the operator, if any — REFUSED rather than ignored when wrong.
+  ///
+  /// Falling back would make the override unfalsifiable: a typo'd path would produce a run
+  /// that looks exactly like a working one, and nobody would learn the variable was never
+  /// read. Same posture as the sibling Kotlin surface's `FUARAN_CORPUS` leg.
+  static func declaredCorpus() throws -> URL? {
+    guard let declared = ProcessInfo.processInfo.environment["FUARAN_CORPUS"],
+      !declared.isEmpty
+    else { return nil }
+    let url = URL(fileURLWithPath: declared)
+    if isWireCorpus(url) { return url }
+    throw DeclaredCorpusRefused(
+      message: "FUARAN_CORPUS='\(declared)' does not name the Fuaran UI wire-format corpus: "
+        + "\(missingMarkers(url)) absent. It is refused rather than ignored — falling back would "
+        + "run this gate against a corpus you did not name.")
+  }
+
+  /// The repository's MAIN working tree, when this checkout is a git worktree.
+  ///
+  /// `repoRoot` is derived from `#filePath`, so in a worktree at `<workspace>/wt/<n>` the
+  /// corpus is looked for at `<workspace>/wt/wire-format-fixtures`, where it has never been.
+  /// Every conformance test then failed with the cross-host diagnosis — correctly, since the
+  /// corpus genuinely was not where it looked, and uselessly, because the locator was right
+  /// and the checkout was not the one it describes. A shared corpus belongs to the
+  /// REPOSITORY rather than to whichever checkout of it is running, so it is resolved from
+  /// the main working tree: `.git` in a worktree is a FILE whose `gitdir:` line points into
+  /// the primary repository's `.git/worktrees/<name>`, and three levels up from there is the
+  /// primary checkout. Reading that file needs no `git` process and no environment variable,
+  /// which is why a worktree campaign in this repository now needs no configuration at all.
+  static func mainWorktreeRoot() -> URL? {
+    let dotGit = repoRoot.appendingPathComponent(".git")
+    var isDir: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: dotGit.path, isDirectory: &isDir),
+      !isDir.boolValue,
+      let text = try? String(contentsOf: dotGit, encoding: .utf8)
+    else { return nil }  // a plain checkout (.git is a directory) — nothing to redirect to
+    let prefix = "gitdir:"
+    guard
+      let line = text.split(separator: "\n").map({ $0.trimmingCharacters(in: .whitespaces) })
+        .first(where: { $0.hasPrefix(prefix) })
+    else { return nil }
+    let gitDir = URL(
+      fileURLWithPath: String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces))
+    // <primary>/.git/worktrees/<name> → <primary>
+    return
+      gitDir
+      .deletingLastPathComponent()  // worktrees
+      .deletingLastPathComponent()  // .git
+      .deletingLastPathComponent()  // <primary checkout>
+  }
+
+  /// Where the corpus may be, in order. The DECLARED root is deliberately not here: it
+  /// refuses rather than falling through, so `requireCorpus` consults it first and lets the
+  /// refusal propagate. Putting it in this list would make it just another candidate, which
+  /// is the fall-back the refusal exists to prevent.
+  static func corpusCandidates() -> [URL] {
+    var out = [expectedCorpusPath]
+    if let main = mainWorktreeRoot() {
+      out.append(main.deletingLastPathComponent().appendingPathComponent("wire-format-fixtures"))
+    }
+    return out
   }
 
   /// Sibling hosts whose presence proves this is a CROSS-HOST checkout — the shape the
@@ -136,13 +217,16 @@ final class CorpusTests: XCTestCase {
   /// was tried, so the fix is to correct the locator rather than to let the harness keep
   /// skipping.
   static func requireCorpus() throws -> URL {
+    // The declared root FIRST, and its refusal propagates rather than falling through.
+    if let declared = try declaredCorpus() { return declared }
     if let corpus = corpusDir() { return corpus }
     if let sibling = crossHostSibling() {
+      let tried = corpusCandidates().map(\.path).joined(separator: ", ")
       XCTFail(
         "cross-host checkout detected (\(sibling.name)/ is present under \(sibling.under.path)) "
-          + "but the wire-format-fixtures corpus is not at \(expectedCorpusPath.path) — this gate "
-          + "certified NOTHING. If the corpus moved or was renamed, correct `expectedCorpusPath` "
-          + "rather than letting the harness skip.")
+          + "but the wire-format-fixtures corpus is at none of [\(tried)] — this gate certified "
+          + "NOTHING. If the corpus moved or was renamed, correct `corpusCandidates()` rather "
+          + "than letting the harness skip; if this is a one-off layout, name it in FUARAN_CORPUS.")
       throw CorpusMissingOnCrossHostCheckout()
     }
     throw XCTSkip("wire-format-fixtures corpus not found — standalone checkout; skipping.")

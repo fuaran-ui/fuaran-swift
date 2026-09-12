@@ -471,7 +471,13 @@ extension Decode {
       // flat prior {"$type":"filter","column":C,"op":O,"param":P | "value":V}
       // coerces to the canonical nested predicate.
       if let predJ = f["pred"] ?? f["predicate"] {
-        return .filter(pred: try colExpr("\(path).pred", predJ))
+        // §21.8 (Phase 1662) — a `filter` predicate is one of the two pipeline
+        // positions the evaluation bound covers, and it is a SEPARATE branch of
+        // this decoder from `derive`: a host that bounded one and left the other
+        // open would pass a corpus carrying only the `derive` vector.
+        let pred = try colExpr("\(path).pred", predJ)
+        try checkExprBound("\(path).pred", pred)
+        return .filter(pred: pred)
       }
       guard let colJ = f["column"], let opJ = f["op"] else {
         throw wrongType(
@@ -508,9 +514,15 @@ extension Decode {
       return .project(
         cols: try items.enumerated().map { try colPair("\(path).cols[\($0.0)]", $0.1) })
     case "derive":
-      return .derive(
-        name: try reqString(path, f, "name"),
-        expr: try colExpr("\(path).expr", try req(path, f, "expr")))
+      let deriveName = try reqString(path, f, "name")
+      // §21.8 (Phase 1662) — the other bounded pipeline position, and the one
+      // that motivated closing the scope: an expression wrapped in a `derive`
+      // reaches the same evaluator as a `Binding.expr` and carried no ceiling
+      // at all, so the bound on the binding was bypassable by moving the
+      // expression here.
+      let deriveExpr = try colExpr("\(path).expr", try req(path, f, "expr"))
+      try checkExprBound("\(path).expr", deriveExpr)
+      return .derive(name: deriveName, expr: deriveExpr)
     case "groupBy":
       // Lenient-ingest (Core Phase 92): `by` aliases `keys`; `aggregations`
       // aliases `aggs`.

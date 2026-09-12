@@ -153,6 +153,162 @@
         writeSlot(fuaran_session_set_query, key: name, value: valueJSON))
     }
 
+    // ── Placement (Phase 833; `move` Phase 1673) ─────────────────────────────
+    //
+    // The op vocabulary is positionless — InsertChild and MoveNode APPEND, and an
+    // explicit order is stated only by a ReorderChildren naming every sibling —
+    // so "put this node there" is an algebra, not an op. The core owns that
+    // algebra and this verb reaches it. This surface is a DECODE-ONLY projection:
+    // it cannot author a TreeOp, so without this entry point the only way to move
+    // a node from Swift would be to reimplement the algebra here, which is the
+    // second implementation the C-ABI exists to prevent.
+    //
+    // ONLY `move` is surfaced, and that is a scope decision rather than an
+    // oversight. The core also carries `place` / `nudge` / `duplicate` / `paste`
+    // (Phase 833) and this projection cannot reach any of them either; whether a
+    // decode-only surface should author placements GENERALLY is a product
+    // question that has not been asked, and answering it as a side effect of
+    // adding a drag-move would be deciding it rather than raising it. The helpers
+    // below are shaped for the whole family so that answering it later is
+    // additive.
+    //
+    // It returns the emitted canonical `TreeOp` JSON. That is not a courtesy:
+    // the op is the artefact the verb COMPUTED, and a host that journals, replays
+    // or diffs its op-stream needs it and cannot re-derive it from the resulting
+    // tree. Discard it with `_ =` when you do not.
+    //
+    // On refusal the held tree is UNTOUCHED and a `FuaranError` is thrown whose
+    // `errorClass` is `"placement"` (the apply-side refusal this placement would
+    // have met, pre-stated — so a drag can be greyed out without a dry run) or
+    // `"request"` (the request document itself was wrong).
+
+    /// Where a placement puts the node among its new siblings.
+    ///
+    /// An anchor belongs to `before` / `after` and to nothing else, which is why
+    /// it is carried by those cases rather than by a separate optional
+    /// parameter: the core REFUSES an anchor supplied with `last` / `first`
+    /// rather than dropping it, and a type that cannot express the refused shape
+    /// is better than one that can and is told off for it.
+    public enum Placement: Equatable, Sendable {
+      case last
+      case first
+      case before(String)
+      case after(String)
+
+      fileprivate var caseName: String {
+        switch self {
+        case .last: return "Last"
+        case .first: return "First"
+        case .before: return "Before"
+        case .after: return "After"
+        }
+      }
+
+      fileprivate var anchor: String? {
+        switch self {
+        case .last, .first: return nil
+        case .before(let a), .after(let a): return a
+        }
+      }
+    }
+
+    /// Relocate a node ALREADY IN THE TREE — the drag-move.
+    ///
+    /// The node KEEPS ITS ID: the core emits `MoveNode` (plus a
+    /// `ReorderChildren` when appending does not already give the wanted order),
+    /// so nothing is minted and nothing is remapped. That is why a caller cannot
+    /// spell a move as place-then-remove: between those two ops the moved id
+    /// either does not exist or exists twice.
+    ///
+    /// Throws with code `MoveIntoSelf` or `MoveIntoDescendant` when the
+    /// destination is the node itself or sits inside its own subtree — refused
+    /// before any op is emitted.
+    @discardableResult
+    public func move(source: String, parentId: String, placement: Placement) throws -> String {
+      try placementVerb(
+        fuaran_session_move,
+        request(parentId: parentId, placement: placement, extra: [("source", .string(source))]))
+    }
+
+    // ── Placement boundary helpers ───────────────────────────────────────────
+
+    /// A member value: either a string this encoder quotes and escapes, or a
+    /// caller-supplied JSON document spliced verbatim (a node, or a number).
+    /// Splicing is not a hole in the encoder — a malformed `.raw` is refused by
+    /// the CORE's own parser and comes back as a `request` error, which is the
+    /// decoder that owns that judgement.
+    fileprivate enum JSONFragment {
+      case string(String)
+      case raw(String)
+
+      var encoded: String {
+        switch self {
+        case .raw(let r): return r
+        case .string(let s): return FuaranSession.quote(s)
+        }
+      }
+    }
+
+    /// The JSON string form, written here rather than reached for from
+    /// Foundation because this target hand-rolls its JSON reader for the same
+    /// reason (`JSON.swift`) — a dependency-light surface.
+    fileprivate static func quote(_ s: String) -> String {
+      var out = "\""
+      for scalar in s.unicodeScalars {
+        switch scalar {
+        case "\"": out += "\\\""
+        case "\\": out += "\\\\"
+        case "\u{08}": out += "\\b"
+        case "\u{0C}": out += "\\f"
+        case "\n": out += "\\n"
+        case "\r": out += "\\r"
+        case "\t": out += "\\t"
+        default:
+          if scalar.value < 0x20 {
+            let hex = String(scalar.value, radix: 16)
+            out += "\\u" + String(repeating: "0", count: 4 - hex.count) + hex
+          } else {
+            out.unicodeScalars.append(scalar)
+          }
+        }
+      }
+      return out + "\""
+    }
+
+    fileprivate func object(_ members: [(String, JSONFragment)]) -> String {
+      "{" + members.map { "\(FuaranSession.quote($0.0)):\($0.1.encoded)" }.joined(separator: ",")
+        + "}"
+    }
+
+    /// The destination members every placement verb but `nudge` carries.
+    fileprivate func request(
+      parentId: String, placement: Placement, extra: [(String, JSONFragment)]
+    ) -> String {
+      var members: [(String, JSONFragment)] = [
+        ("parentId", .string(parentId)),
+        ("placement", .string(placement.caseName)),
+      ]
+      if let anchor = placement.anchor { members.append(("anchor", .string(anchor))) }
+      return object(members + extra)
+    }
+
+    /// One placement call: marshal the request, read the envelope, throw on a
+    /// refusal, hand back the emitted op.
+    @discardableResult
+    private func placementVerb(
+      // As `writeSlot` below: `fn` is an imported C function, captures nothing,
+      // and is annotated `@Sendable` so Swift 6 region isolation accepts passing
+      // it into the `withUnsafeBufferPointer` closure.
+      _ fn: @Sendable (OpaquePointer?, UnsafePointer<UInt8>?, Int) -> FuaranBuf,
+      _ requestJSON: String
+    ) throws -> String {
+      let out = Array(requestJSON.utf8).withUnsafeBufferPointer { bp in
+        FuaranSession.consume(fn(handle, bp.baseAddress, bp.count))
+      }
+      try FuaranSession.throwIfError(out)
+      return out
+    }
+
     // ── Boundary helpers ───────────────────────────────────────────────────────
 
     private func writeSlot(

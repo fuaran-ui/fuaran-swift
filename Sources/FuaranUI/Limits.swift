@@ -16,7 +16,12 @@
 // a 25-level node tree, one past the limit, was ACCEPTED outright, so a document every
 // rostered host refuses decoded here.
 
-/// The five §21.1 figures.
+/// The §21 figures — five structural bounds from §21.1, plus the two VALUE bounds §21.8
+/// and §21.9 added later.
+///
+/// The count is not restated here on purpose: it was "five" while the type held six, and
+/// then while it held seven, because a number in prose beside a list is one more thing to
+/// keep in step with the list.
 ///
 /// They are **protocol numbers, not tuning knobs**: a document within them is one every
 /// host MUST decode, and a document beyond them is one every host MUST refuse, with the
@@ -59,18 +64,64 @@ public enum WireLimits {
   /// it.
   public static let maxNodes = 100_000
 
-  /// Maximum `ColExpr` nodes in ONE `Binding.expr` expression (§21.8).
+  /// Maximum `ColExpr` nodes in ONE expression (§21.8).
   ///
   /// The other limits bound the SIZE of a document; this one bounds what a host
   /// must EVALUATE, which is why it exists beside them rather than being
   /// derived from them. Counted per expression rather than per document — a
-  /// tree may carry many `expr` bindings, each bounded here, with the whole
-  /// still bounded by `maxNodes`.
+  /// tree may carry many expressions, each bounded here, with the whole still
+  /// bounded by `maxNodes`.
   ///
-  /// Its scope is `Binding.expr` and nothing else: a `ColExpr` inside a
-  /// `Binding.transform` PIPELINE is deliberately not covered, because a
-  /// pipeline's cost is already bounded by its own rows and steps.
+  /// Its scope is EVERY expression a decoded document can name (Phase 1662): a
+  /// `Binding.expr`'s expression, and the `ColExpr` a `Binding.transform`
+  /// PIPELINE embeds — a `derive` step's `expr`, a `filter` step's `pred`.
+  /// Those positions are the whole surface, and that is a fact about the step
+  /// vocabulary rather than a hope: `filter` and `derive` are the only steps
+  /// carrying an expression, and a `join` / `union` / `intersect` / `except`
+  /// operand is a data source, never another pipeline.
+  ///
+  /// This comment carried the OPPOSITE rule until Phase 1677 — "its scope is
+  /// `Binding.expr` and nothing else", with a pipeline's cost said to be
+  /// bounded already by its own rows and steps. That reasoning is superseded
+  /// rather than merely out of date: a pipeline's rows bound how MANY times an
+  /// expression is evaluated, never how large the expression is, so naming the
+  /// pipeline positions as excluded made the bound bypassable by wrapping the
+  /// expression in a `transform` — the one shape from which a decoded document
+  /// could still name an unbounded evaluation. §21.8 states the consequence
+  /// outright, because closing it refuses documents this projection previously
+  /// accepted: no profile boundary, and no grandfathering.
   public static let maxExprNodes = 512
+
+  /// Maximum `rows` on ONE `Skeleton` node (§21.9).
+  ///
+  /// The first bound here that a document breaches with four digits rather than
+  /// with bulk, and ``maxExprNodes``'s argument applies more sharply because
+  /// this is not even an evaluation — the rows are simply not present in the
+  /// input. A renderer emits one placeholder row per count, so
+  /// `{"$type":"Skeleton","rows":100000000}` is a document well inside every
+  /// other limit (a handful of bytes, one node, three JSON levels) that names a
+  /// hundred million rendered rows. Every structural limit is satisfied, and
+  /// each is satisfied because none of them is looking at the VALUE.
+  ///
+  /// **§7.1 decides FIRST, and the ORDER is the whole of what keeps the two
+  /// rules apart.** §7.1 governs what a typed integer slot can HOLD, and
+  /// `2147483647` is finite, fraction-free and inside signed 32-bit, so §7.1
+  /// admits it; this bound then refuses it for the work it names. So a value
+  /// that is not an integer at all stays `WRONG_TYPE` and never a limit breach,
+  /// and a 32-bit-valid value past the bound is `LIMIT_EXCEEDED` and never a
+  /// wrong type. Reading this as a narrowing of the slot's TYPE also refuses
+  /// the at-the-bound document every host must accept — one misreading,
+  /// breaching §21.2 rules 1 and 2 at once, which is why both halves are corpus
+  /// fixtures.
+  ///
+  /// **An UPPER bound only, and the omission is deliberate.** A negative `rows`
+  /// is not a resource breach — nothing expands — and answering
+  /// `LIMIT_EXCEEDED` for it would be the actively-wrong diagnosis: it tells an
+  /// author to come back under a ceiling when what they wrote is a count that
+  /// cannot be drawn at all. That is an authoring defect, and it belongs to the
+  /// pre-emit validator family, which this decode-only projection over the Rust
+  /// reference core does not carry.
+  public static let maxSkeletonRows = 10_000
 }
 
 /// One decode call's §21 node-axis counters.

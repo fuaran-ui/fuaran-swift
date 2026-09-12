@@ -55,13 +55,23 @@
 
 # ── Reject vectors this decoder does not yet refuse ─────────────────────────
 #
-# EMPTY, AND MEASURED — Phase 1499, and STILL empty after Phase 1548. This
+# EMPTY, AND MEASURED — Phase 1499, and STILL empty after Phase 1548 and Phase
+# 1677. This
 # section was previously empty because the landing machine had no Swift toolchain
 # and the IDs could not be derived without running the decoder; it is empty now
 # because there are none. Every reject vector in the shared corpus refuses with
 # the pinned code at the pinned path, and `testEveryRejectFixtureIsRefused` is
 # what says so: it fails on any vector this file does not name, so an empty
 # section is a claim the suite re-checks on every run rather than an omission.
+#
+# THE CLAIM CARRIES ITS RUN, because "a Swift toolchain said so" is the only thing
+# that can settle it and no estate machine has one. Most recently:
+# `swift-ci` run 34664654776, job `swift-core`, where
+# `-[FuaranUITests.CorpusTests testEveryRejectFixtureIsRefused]` passed in 0.075s
+# against the corpus as it then stood. Citing a run rather than asserting the
+# emptiness is the difference between a measured claim and a hopeful one; a
+# machine reading this file offline cannot re-derive it, and should not pretend
+# to.
 #
 # Phase 1548 added four to the corpus — the wrong shape and the non-positive
 # value for each of `maxBytes` and `maxFiles` — and all four were accepted here
@@ -70,6 +80,18 @@
 # (§3.6.23), and each refusal is asserted beside its corrected twin in
 # `UploadCeilingDecodeTests.swift`: a decoder that refused every ceiling outright
 # would satisfy all four vectors and be wrong in the more expensive direction.
+#
+# Phase 1677 added six more, from three families that arrived together, and the
+# section is still empty because each was CLOSED rather than listed: the two
+# `I18n` argument vectors (an argument carrying a `$type` is a binding, so the
+# binding's own refusals belong at the argument's path — the bag was previously
+# checked only for an explicit null), the three §21.8 pipeline-expression
+# vectors, and the §21.9 `Skeleton.rows` ceiling. The middle three are the
+# instructive ones: the bound existed and was scoped to `Binding.Expr` alone, so
+# the same 513-node expression was refused there and accepted by wrapping it in
+# a `Transform` — a limit with a stated exclusion on the one surface an
+# expression can be moved to is not a scope, it is a bypass. A residue line for
+# those would have capped a hole rather than an unmodelled slot.
 #
 # The residue it recorded — the three form-field kinds, the widened clipboard
 # payload, the four `FileUpload` members, `Modal.modality`, `SemanticStyle.direction`

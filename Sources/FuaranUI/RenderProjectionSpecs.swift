@@ -363,7 +363,29 @@ extension Decode {
 
   static func skeletonSpec(_ path: String, _ j: JSON) throws -> SkeletonSpec {
     let f = try object(path, j)
-    return SkeletonSpec(rows: try reqInt(path, f, "rows"))
+    // §21.9 (Phase 1666) — `rows` names a number of placeholder rows a renderer
+    // EMITS, so the document gives its reader no size signal at all and this
+    // bound is the only thing between a handful of bytes and the expansion.
+    //
+    // `reqInt` DECIDES FIRST, and that ordering is the whole of what keeps the
+    // two rules apart: §7.1 governs what the slot can HOLD, so a fraction, a
+    // non-finite or an out-of-32-bit value stays a WRONG_TYPE and is never a
+    // limit breach; this then refuses a value the slot CAN hold, for the work it
+    // names. Answering WRONG_TYPE at `2147483647` would be the same misreading
+    // that refuses the at-the-bound document every host must accept.
+    //
+    // UPPER bound only. A negative count expands nothing, so reporting it here
+    // would send an author to come back under a ceiling when what they wrote
+    // cannot be drawn at all — an authoring defect, and this decode-only
+    // projection carries no pre-emit validator.
+    let rows = try reqInt(path, f, "rows")
+    if rows > WireLimits.maxSkeletonRows {
+      throw err(
+        .limitExceeded, "\(path).rows",
+        "skeleton rows \(rows), above the \(WireLimits.maxSkeletonRows) one Skeleton may name "
+          + "(WIRE_FORMAT.md §21.9)")
+    }
+    return SkeletonSpec(rows: rows)
   }
 
   static func calloutSpec(_ path: String, _ j: JSON) throws -> CalloutSpec {

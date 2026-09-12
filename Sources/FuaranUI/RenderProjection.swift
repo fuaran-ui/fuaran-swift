@@ -400,13 +400,52 @@ enum Decode {
       path, "a JSON value (an explicit null is not a payload — omit the key instead)")
   }
 
-  /// A string-keyed map of host-opaque payload values (`Custom.props`,
-  /// `TextSource.I18n.args`). The same rule, applied per ENTRY so the refusal
-  /// names the offending key rather than the whole map.
+  /// A string-keyed map of host-opaque payload values (`Custom.props`). The
+  /// same rule, applied per ENTRY so the refusal names the offending key rather
+  /// than the whole map.
   static func jvalMap(_ path: String, _ j: JSON) throws -> [String: JSON] {
     let f = try object(path, j)
     for (key, v) in f.sorted(by: { $0.key < $1.key }) {
       _ = try jval("\(path).\(key)", v)
+    }
+    return f
+  }
+
+  /// A `TextSource.I18n` argument bag — discriminated BY INSPECTION (§5, Phase
+  /// 1661). An argument is a `Binding<JSON>`, not a bare value, and the wire
+  /// carries no tag saying which of the two arms one is:
+  ///
+  ///  * an object carrying a `$type` member is the BINDING form;
+  ///  * every other JSON value is the LITERAL form, governed by rule 12 exactly
+  ///    as the whole bag was before the slot widened.
+  ///
+  /// This projection still holds the bag RAW, and that is a statement about
+  /// what a render projection over the Rust reference core needs rather than a
+  /// shortcut: it never resolves an argument, and a bound one has no value on
+  /// the wire to hold. What inspecting the `$type` buys is the REFUSALS — an
+  /// unrecognised binding case, or a known case with a required member missing
+  /// — reported at the ARGUMENT's own path, which is where an author reading
+  /// the refusal has to go.
+  ///
+  /// `jvalMap` could raise neither, because it only ever asked whether an entry
+  /// was an explicit null: `{"$type":"Nope"}` and a `{"$type":"State"}` with no
+  /// `key` both decoded here while every codec host refused the document.
+  /// Falling back to the literal reading for an unknown case is not an option
+  /// the format leaves open — it would substitute a discriminator's own text
+  /// into a sentence a reader reads.
+  static func i18nArgs(_ path: String, _ j: JSON) throws -> [String: JSON] {
+    let f = try object(path, j)
+    // Sorted by name, as the `Binding.I18n` arm already is: a Swift dictionary's
+    // iteration order is not a property of the document, so with two invalid
+    // entries an unsorted walk reports a different REFUSAL on every call.
+    for (key, v) in f.sorted(by: { $0.key < $1.key }) {
+      let argPath = "\(path).\(key)"
+      if case .object(let arg) = v, arg["$type"] != nil {
+        // Decoded for its refusals; the raw entry is what the bag keeps.
+        _ = try binding(argPath, v)
+      } else {
+        _ = try jval(argPath, v)
+      }
     }
     return f
   }
@@ -851,15 +890,13 @@ extension Decode {
       let exprPath = "\(path).expr"
       let e = try colExpr(exprPath, try req(path, f, "expr"))
       // §21.8 — the evaluation bound, counted per EXPRESSION rather than per
-      // document. Its scope is this case and nothing else: a `ColExpr` inside a
-      // pipeline is deliberately not covered.
-      let nodes = countExprNodes(e)
-      if nodes > WireLimits.maxExprNodes {
-        throw err(
-          .limitExceeded, exprPath,
-          "expression carries \(nodes) nodes, above the \(WireLimits.maxExprNodes) a single "
-            + "Binding.Expr may hold")
-      }
+      // document. Its scope is EVERY expression a decoded document can name, so
+      // a pipeline's `derive` / `filter` expressions take the same bound where
+      // they are decoded (Phase 1662). This comment named them as deliberately
+      // NOT covered until Phase 1677, which is exactly what made the bound
+      // bypassable: the same expression refused here was accepted by wrapping
+      // it in a `Transform`.
+      try checkExprBound(exprPath, e)
       let exprParams = try bindingParams(path, f)
       // The two refusals, both because an `Expr` HAS NO ROW. Left admitted,
       // each would decode to an expression whose evaluation could only ever
@@ -920,7 +957,7 @@ extension Decode {
       return .bound(try binding("\(path).binding", try req(path, f, "binding")))
     case "I18n":
       let key = try reqString(path, f, "key")
-      let args = try f["args"].map { try jvalMap("\(path).args", $0) } ?? [:]
+      let args = try f["args"].map { try i18nArgs("\(path).args", $0) } ?? [:]
       return .i18n(key: key, args: args)
     case let o: throw unknownCase(path, o, "Literal | Bound | I18n")
     }
@@ -1128,6 +1165,33 @@ extension Decode {
   /// `maxExprNodes`, counted per EXPRESSION rather than per document.
   static func countExprNodes(_ e: ColExpr) -> Int {
     1 + exprChildren(e).reduce(0) { $0 + countExprNodes($1) }
+  }
+
+  /// §21.8's evaluation bound over ONE decoded expression, refused at the path
+  /// of the member that carries it so an author is told which expression — and,
+  /// in a pipeline, which STEP — to come back under.
+  ///
+  /// Shared by the three positions the bound covers, so there is ONE definition
+  /// of it rather than one per arm: a `Binding.expr`'s `expr`, a pipeline
+  /// `derive` step's `expr`, and a pipeline `filter` step's `pred`. Those three
+  /// are the whole surface — no other step carries an expression, and a `join`
+  /// / `union` / `intersect` / `except` operand is a data source rather than
+  /// another pipeline — so this bounds every expression a decoded document can
+  /// name, which is what §21.8 asks and what a scope naming only the binding
+  /// could not deliver.
+  ///
+  /// Taken at DECODE and not left to the evaluator, because this projection
+  /// hands a decoded tree to the Rust core and to an embedding app: a document
+  /// that DECODES must not be able to name an unbounded evaluation, whoever
+  /// runs it and whenever.
+  static func checkExprBound(_ path: String, _ e: ColExpr) throws {
+    let nodes = countExprNodes(e)
+    if nodes > WireLimits.maxExprNodes {
+      throw err(
+        .limitExceeded, path,
+        "expression carries \(nodes) nodes, above the \(WireLimits.maxExprNodes) one expression "
+          + "may hold (WIRE_FORMAT.md §21.8)")
+    }
   }
 
   /// The first `col` reference reachable in `e`, if any (§3.3.2 refusal 1).

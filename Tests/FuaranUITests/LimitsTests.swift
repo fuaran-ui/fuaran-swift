@@ -123,6 +123,82 @@ final class LimitsTests: XCTestCase {
     XCTAssertEqual(Self.verdict(doc), "LIMIT_EXCEEDED")
   }
 
+  // ── §21.9 max skeleton rows ─────────────────────────────────────────────────
+
+  static func skeletonDoc(_ rows: String) -> String {
+    "{\"id\":\"s\",\"kind\":{\"$type\":\"Skeleton\",\"rows\":\(rows)}}"
+  }
+
+  func testSkeletonRowsAtTheBoundDecodesAndOnePastItIsRefused() throws {
+    // The ACCEPT half first, because it is the one a misreading breaks: a host
+    // that read §21.9 as a narrowing of the integer slot's TYPE refuses this
+    // document too, and a refusal-only test passes throughout that defect.
+    XCTAssertEqual(
+      Self.verdict(Self.skeletonDoc("\(WireLimits.maxSkeletonRows)")), "ACCEPTED",
+      "a Skeleton AT the bound is a document every host must accept (§21.2 rule 1)")
+    XCTAssertEqual(
+      Self.verdict(Self.skeletonDoc("\(WireLimits.maxSkeletonRows + 1)")), "LIMIT_EXCEEDED")
+  }
+
+  func testTheSkeletonRowsBoundDoesNotDisplaceTheSlotsType() throws {
+    // §21.9's ORDER rule, from both sides. §7.1 decides what the slot can HOLD,
+    // so the 32-bit maximum is admitted there and refused HERE for the work it
+    // names — it is the only value that can separate the two readings, which is
+    // why the corpus's reject vector uses it rather than 10 001.
+    XCTAssertEqual(Self.verdict(Self.skeletonDoc("2147483647")), "LIMIT_EXCEEDED")
+    // And a value the slot cannot hold at all stays a wrong type, never a limit
+    // report: the document is refused for its shape, not for its size.
+    XCTAssertEqual(Self.verdict(Self.skeletonDoc("2.5")), "WRONG_TYPE")
+    XCTAssertEqual(Self.verdict(Self.skeletonDoc("1e10")), "WRONG_TYPE")
+  }
+
+  func testTheSkeletonRowsBoundIsUpperOnly() throws {
+    // A negative count expands nothing, so it is not a resource breach and must
+    // not be reported as one — that diagnosis tells an author to come back under
+    // a ceiling when what they wrote cannot be drawn at all. It is an authoring
+    // defect, and this decode-only projection carries no pre-emit validator.
+    //
+    // Asserted as "not a limit breach" rather than as "accepted", because that
+    // is exactly what §21.9 claims: a host implementing the decode bound and not
+    // the authoring rule is conformant, so pinning ACCEPTED here would pin a
+    // decision the section leaves open.
+    XCTAssertNotEqual(
+      Self.verdict(Self.skeletonDoc("-5")), "LIMIT_EXCEEDED",
+      "§21.9 is an UPPER bound only — a negative count is an authoring defect, not an expansion")
+  }
+
+  // ── §21.8 max expression nodes, on the PIPELINE surface ─────────────────────
+
+  /// `n` `col` leaves under one `coalesce`, so the expression counts `n + 1`
+  /// nodes — the same shape the corpus's own at-max and reject vectors use.
+  static func coalesceOfCols(_ n: Int) -> String {
+    let leaf = "{\"$type\":\"col\",\"name\":\"a\"}"
+    return "{\"$type\":\"coalesce\",\"exprs\":["
+      + Array(repeating: leaf, count: n).joined(separator: ",") + "]}"
+  }
+
+  /// A `DataGrid` over a `Transform` whose single `derive` step carries an
+  /// expression of exactly `exprNodes` nodes.
+  static func derivePipelineDoc(_ exprNodes: Int) -> String {
+    "{\"id\":\"x\",\"kind\":{\"$type\":\"DataGrid\",\"columns\":[],\"rowKeyField\":\"a\","
+      + "\"source\":{\"$type\":\"Transform\",\"pipeline\":[{\"$type\":\"derive\","
+      + "\"expr\":\(coalesceOfCols(exprNodes - 1)),\"name\":\"d\"}],"
+      + "\"source\":{\"columns\":{\"a\":{\"validity\":[true],\"values\":[1]}},"
+      + "\"schema\":[{\"name\":\"a\",\"type\":\"int\"}]}}}}"
+  }
+
+  func testAPipelineExpressionAtTheBoundDecodesAndOnePastItIsRefused() throws {
+    // The bypass that motivated widening §21.8's scope: this is exactly the
+    // expression a `Binding.Expr` refuses at 513 nodes, and wrapping it in a
+    // `Transform` escaped the bound entirely. The at-the-bound half is asserted
+    // beside it because closing a bypass one node too tightly refuses a document
+    // every host must accept.
+    XCTAssertEqual(
+      Self.verdict(Self.derivePipelineDoc(WireLimits.maxExprNodes)), "ACCEPTED")
+    XCTAssertEqual(
+      Self.verdict(Self.derivePipelineDoc(WireLimits.maxExprNodes + 1)), "LIMIT_EXCEEDED")
+  }
+
   func testARefusedDecodeDoesNotPoisonTheNext() throws {
     // The counter is decremented in `defer` precisely so a refusal leaves no residue.
     // Without that, each refused decode would tighten the budget until a valid tree was

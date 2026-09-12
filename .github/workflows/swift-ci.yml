@@ -78,7 +78,7 @@ jobs:
   swift:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The corpus became its OWN public repo on 2026-07-27
       # (fuaran-ui/fuaran-ui-specification). It had been a tracked folder inside
@@ -114,7 +114,7 @@ jobs:
           echo "corpus pinned at $ref"
 
       - name: Checkout wire-format-fixtures corpus (render-coverage gate)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: fuaran-ui/fuaran-ui-specification
           ref: ${{ steps.pin.outputs.ref }}
@@ -231,12 +231,12 @@ jobs:
     runs-on: macos-15
     steps:
       - name: Checkout fuaran-swift
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: fuaran-swift
 
       - name: Checkout fuaran-rs (sibling reference core)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: fuaran-ui/fuaran-rs
           path: fuaran-rs
@@ -267,7 +267,7 @@ jobs:
           echo "corpus pinned at $ref"
 
       - name: Checkout wire-format-fixtures corpus (render-coverage gate)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: fuaran-ui/fuaran-ui-specification
           ref: ${{ steps.pin.outputs.ref }}

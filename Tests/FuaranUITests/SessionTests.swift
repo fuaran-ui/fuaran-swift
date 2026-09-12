@@ -157,6 +157,102 @@ final class SessionTests: XCTestCase {
       XCTAssertEqual(fed, .rows([]))
     }
 
+    // ── Placement (Phase 833; `move` Phase 1673) ─────────────────────────────
+    //
+    // A drag-move EXERCISED, not merely declared in a header. The verb existed on
+    // the Rust library surface from Phase 833 and was reachable from nowhere
+    // else: this projection is decode-only, so without the C-ABI entry point the
+    // only way to move a node from Swift was to author the ops by hand — a second
+    // implementation of an algebra this core is the reference for.
+
+    private var placementTree: String {
+      #"""
+      {"id":"root","kind":{"$type":"Box","children":[{"id":"left","kind":{"$type":"Box","children":[{"id":"a","kind":{"$type":"Markdown","text":"A"}},{"id":"b","kind":{"$type":"Markdown","text":"B"}}],"layout":{"$type":"Flex","direction":"Vertical","wrap":false},"role":"Group"}},{"id":"right","kind":{"$type":"Box","children":[],"layout":{"$type":"Flex","direction":"Vertical","wrap":false},"role":"Group"}}],"layout":{"$type":"Flex","direction":"Vertical","wrap":false},"role":"Group"}}
+      """#
+    }
+
+    /// The ids of a Box's children, read off the session's OWN tree — so what is
+    /// asserted is the tree the core holds, never a Swift-side echo of the
+    /// request. Box-only, which is all the fixture above contains; a non-Box
+    /// parent reads as childless and would fail the assertion loudly rather than
+    /// quietly matching.
+    private func childIds(_ treeJSON: String, of parentId: String) throws -> [String] {
+      let root = try RenderProjection.decodeNode(treeJSON)
+      func kids(_ node: Node) -> [Node] {
+        if case .box(let spec) = node.kind { return spec.children }
+        return []
+      }
+      func find(_ node: Node) -> Node? {
+        if node.id == parentId { return node }
+        for child in kids(node) {
+          if let hit = find(child) { return hit }
+        }
+        return nil
+      }
+      guard let parent = find(root) else {
+        XCTFail("no node '\(parentId)' in the session tree")
+        return []
+      }
+      return kids(parent).map(\.id)
+    }
+
+    /// One call moves a node between containers, and the node KEEPS ITS ID — the
+    /// property that separates a move from a duplicate, and the reason it cannot
+    /// be spelled as place-then-remove.
+    func testMoveRelocatesANodeAndKeepsItsId() async throws {
+      let session = try FuaranSession(treeJSON: placementTree)
+      let op = try await session.move(source: "a", parentId: "right", placement: .last)
+      XCTAssertTrue(op.contains("\"MoveNode\""), "expected a MoveNode op, got: \(op)")
+
+      let tree = await session.treeJSON()
+      XCTAssertEqual(
+        try childIds(tree, of: "left"), ["b"],
+        "the moved node should have left its old parent")
+      XCTAssertEqual(
+        try childIds(tree, of: "right"), ["a"],
+        "the moved node should have arrived, under its own id")
+    }
+
+    /// A move with an anchor lands in the right PLACE, not merely under the right
+    /// parent — the reorder the core folds into the same call.
+    func testMoveBeforeAnAnchorLandsInPosition() async throws {
+      let session = try FuaranSession(treeJSON: placementTree)
+      _ = try await session.move(source: "right", parentId: "left", placement: .before("b"))
+      XCTAssertEqual(try childIds(await session.treeJSON(), of: "left"), ["a", "right", "b"])
+    }
+
+    /// A refusal is TYPED and the held tree is untouched — the pre-stated
+    /// apply-side rejection a drag UI greys out on, rather than a failed apply.
+    func testMoveIntoItselfIsRefusedAndChangesNothing() async throws {
+      let session = try FuaranSession(treeJSON: placementTree)
+      let before = await session.treeJSON()
+      do {
+        _ = try await session.move(source: "left", parentId: "left", placement: .last)
+        XCTFail("moving a node into itself should throw")
+      } catch let e as FuaranError {
+        XCTAssertEqual(e.errorClass, "placement")
+        XCTAssertEqual(e.code, "MoveIntoSelf")
+      }
+      XCTAssertEqual(before, await session.treeJSON(), "a refused move must change nothing")
+    }
+
+    /// The request encoder ESCAPES rather than splicing an id into JSON and
+    /// hoping. An unescaped quote would close the string and the core would
+    /// report a parse failure — a Swift-side defect wearing a core-side error's
+    /// clothes, and indistinguishable from one until someone used an awkward id.
+    func testAQuoteInANodeIdIsEscapedRatherThanBreakingTheRequest() async throws {
+      let session = try FuaranSession(treeJSON: placementTree)
+      do {
+        _ = try await session.move(source: "no\"such", parentId: "right", placement: .last)
+        XCTFail("expected a refusal for an absent node")
+      } catch let e as FuaranError {
+        // The core READ the document and judged its content: the id is absent.
+        // Unescaped, this would have been a `request` parse error instead.
+        XCTAssertEqual(e.errorClass, "placement", "got: \(e)")
+        XCTAssertEqual(e.code, "NodeNotFound", "got: \(e)")
+      }
+    }
+
   #else
 
     func testSessionLegSkipsWhenCoreAbsent() throws {

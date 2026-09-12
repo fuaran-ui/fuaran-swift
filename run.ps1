@@ -31,6 +31,20 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
+# SEED $LASTEXITCODE BEFORE ANY STAGE READS IT.
+#
+# PowerShell leaves it UNSET until the session's first native command, and it does not
+# reset it between commands afterwards. Both halves bite:
+#
+#   * unset, `$LASTEXITCODE -ne 0` is `$null -ne 0`, which is TRUE — so a check reached
+#     before any native command runs reports a failure that did not happen;
+#   * set, it survives into a stage that ran no native command of its own, which is then
+#     graded on whatever the last unrelated one left behind.
+#
+# The sibling `Fuaran-Program` launcher shipped the first half and returned a green `exit
+# $null` having built and tested nothing. Seeding it costs one line and removes the class.
+$LASTEXITCODE = 0
+
 function Write-Skip($msg) { Write-Host "SKIP: $msg" -ForegroundColor Yellow }
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 
@@ -129,8 +143,16 @@ if (-not $env:FUARAN_RS_STATICLIB_DIR) {
     if ((Test-Path $rsDir) -and $cargo) {
         Write-Step "building the Rust reference core staticlib (cargo build in ../fuaran-rs)"
         Push-Location $rsDir
-        try { & cargo build } catch { }
+        # Seeded again HERE, not only at the top: `cargo` may throw before it runs at all
+        # (the catch below swallows that), in which case $LASTEXITCODE still holds whatever
+        # the vcvars import or vswhere probe left — and the check would then report a cargo
+        # failure that never happened, or miss one that did.
+        $LASTEXITCODE = 0
+        try { & cargo build } catch { $LASTEXITCODE = 1 }
         Pop-Location
+        # BEST-EFFORT, deliberately: this leg only ENABLES the C-ABI session tests. Its
+        # failure is reported and skipped, never fatal — unlike `swift build` / `swift test`
+        # below, which are the gate and exit with their own code.
         if ($LASTEXITCODE -ne 0) {
             Write-Skip "cargo build did not succeed in ../fuaran-rs; the C-ABI session leg will use any existing staticlib or skip."
         }

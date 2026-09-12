@@ -90,6 +90,25 @@ else {
     Write-Host "  fuaran.h byte-identical to the reference." -ForegroundColor Green
 }
 
+# ── Corpus pin drift (Phase 1703) ─────────────────────────────────────────────
+# `corpus-pin.json` records the ONE corpus revision this repository's gates certify
+# against, and CI checks the corpus out at it. That closes the class where a corpus
+# commit reddens this repository with no change of its own — at the price of a
+# SILENT staleness if nobody ever looks, which is exactly why the distance is
+# reported here and on every CI run rather than only when something breaks.
+#
+# Advisory, never fatal: being behind the corpus is the ordinary resting state
+# between an authored fixture and the decoder work that adopts it. Same placement
+# and same reasoning as the header check above — a text comparison needing no
+# toolchain, so a box with none still answers the question it CAN answer.
+Write-Step "corpus pin drift"
+$LASTEXITCODE = 0
+& pwsh -NoProfile -File (Join-Path $PSScriptRoot "dev-scripts/corpus-pin.ps1")
+if ($LASTEXITCODE -eq 2) {
+    Write-Skip "the corpus has moved past the pin (above). Adopting it is a deliberate change-set, not a sweep."
+}
+$LASTEXITCODE = 0
+
 # ── Toolchain presence ────────────────────────────────────────────────────────
 $swift = Get-Command swift -ErrorAction SilentlyContinue
 if (-not $swift) {

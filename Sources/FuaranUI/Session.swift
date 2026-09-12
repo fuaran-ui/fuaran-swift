@@ -153,26 +153,36 @@
         writeSlot(fuaran_session_set_query, key: name, value: valueJSON))
     }
 
-    // ── Placement (Phase 833; `move` Phase 1673) ─────────────────────────────
+    // ── Placement (Phase 833; `move` Phase 1673; the other four Phase 1703) ──
     //
     // The op vocabulary is positionless — InsertChild and MoveNode APPEND, and an
     // explicit order is stated only by a ReorderChildren naming every sibling —
     // so "put this node there" is an algebra, not an op. The core owns that
-    // algebra and this verb reaches it. This surface is a DECODE-ONLY projection:
-    // it cannot author a TreeOp, so without this entry point the only way to move
-    // a node from Swift would be to reimplement the algebra here, which is the
-    // second implementation the C-ABI exists to prevent.
+    // algebra and these verbs reach it. This surface is a DECODE-ONLY projection:
+    // it cannot author a TreeOp, so without these entry points the only way to
+    // place a node from Swift would be to reimplement the algebra here, which is
+    // the second implementation the C-ABI exists to prevent.
     //
-    // ONLY `move` is surfaced, and that is a scope decision rather than an
-    // oversight. The core also carries `place` / `nudge` / `duplicate` / `paste`
-    // (Phase 833) and this projection cannot reach any of them either; whether a
-    // decode-only surface should author placements GENERALLY is a product
-    // question that has not been asked, and answering it as a side effect of
-    // adding a drag-move would be deciding it rather than raising it. The helpers
-    // below are shaped for the whole family so that answering it later is
-    // additive.
+    // ALL FIVE are surfaced (Phase 1703). Phase 1673 asked whether a decode-only
+    // projection should author placements GENERALLY, deliberately left it open,
+    // and surfaced only the drag-move. The answer is yes, and the argument is that
+    // the question was settled by `move` rather than raised by it: a surface that
+    // can relocate a node but not insert one is not a narrower answer to "may this
+    // tier author placements" — it is the same answer applied to one fifth of the
+    // algebra, with the other four fifths reachable only through the
+    // reimplementation this seam exists to prevent. The helpers below were left
+    // shaped for the whole family; this is that shape being taken up.
     //
-    // It returns the emitted canonical `TreeOp` JSON. That is not a courtesy:
+    // A node arrives as a canonical wire JSON DOCUMENT (`childJSON`,
+    // `subtreeJSON`), never as a `Node`, and that follows from the tier being
+    // decode-only: `RenderProjection` parses the wire form and does not emit it,
+    // so there is no `Node` → JSON direction here to offer and inventing one would
+    // be a second encoder — the same defect one layer up. The document is spliced
+    // verbatim and judged by the CORE's parser, which is the decoder that owns
+    // that judgement; every STRING member still goes through this tier's own
+    // writer, so an awkward node id is escaped rather than closing the string.
+    //
+    // Each returns the emitted canonical `TreeOp` JSON. That is not a courtesy:
     // the op is the artefact the verb COMPUTED, and a host that journals, replays
     // or diffs its op-stream needs it and cannot re-derive it from the resulting
     // tree. Discard it with `_ =` when you do not.
@@ -228,6 +238,78 @@
       try placementVerb(
         fuaran_session_move,
         request(parentId: parentId, placement: placement, extra: [("source", .string(source))]))
+    }
+
+    /// Insert a NEW node among a parent's children.
+    ///
+    /// `childJSON` is a canonical wire `Node` document, not a `Node`: this tier
+    /// decodes the wire form and does not emit it, so the document comes from
+    /// wherever the caller obtained it (a peer, a template, a previous
+    /// `treeJSON`) and is judged by the core's parser — a malformed one comes
+    /// back as a `request` error rather than being silently reshaped here.
+    ///
+    /// Throws `ParentNotFound` / `ChildlessKind` when the destination cannot take
+    /// a child, `UnknownAnchor` when the anchor is not among its post-op
+    /// children, and `DuplicateId` when an id in the child already exists — a
+    /// `place` mints and remaps NOTHING, which is what separates it from `paste`.
+    @discardableResult
+    public func place(childJSON: String, parentId: String, placement: Placement) throws -> String {
+      try placementVerb(
+        fuaran_session_place,
+        request(parentId: parentId, placement: placement, extra: [("child", .raw(childJSON))]))
+    }
+
+    /// Move a node one or more positions among its OWN siblings — the
+    /// keyboard/handle nudge, which needs no destination because it never leaves
+    /// its parent.
+    ///
+    /// `delta` is a whole number of sibling positions; negative moves earlier.
+    /// Throws `CannotNudgeRoot` (the root has no siblings) or `NudgeOutOfRange`
+    /// (the result would fall outside the sibling list) — both refused before any
+    /// op is emitted, so a held-key repeat stops at the end rather than clamping
+    /// silently.
+    @discardableResult
+    public func nudge(target: String, delta: Int) throws -> String {
+      try placementVerb(
+        fuaran_session_nudge,
+        object([("target", .string(target)), ("delta", .raw(String(delta)))]))
+    }
+
+    /// Copy a node ALREADY IN THE TREE and place the copy.
+    ///
+    /// Unlike `move`, the copy is a NEW node: every id in it that collides with
+    /// one already in the tree is remapped, and ids that do not collide are
+    /// preserved. `idPrefix` selects the deterministic strategy — minted ids are
+    /// `<prefix>-1`, `-2`, … in traversal order — and omitting it takes the
+    /// derived strategy (`<oldId>-copy`, then `-copy-2`, …). Pass one when the
+    /// caller needs to PREDICT the minted ids; omit it when the copy should read
+    /// as a copy of something.
+    @discardableResult
+    public func duplicate(
+      source: String, parentId: String, placement: Placement, idPrefix: String? = nil
+    ) throws -> String {
+      var extra: [(String, JSONFragment)] = [("source", .string(source))]
+      if let idPrefix { extra.append(("idPrefix", .string(idPrefix))) }
+      return try placementVerb(
+        fuaran_session_duplicate,
+        request(parentId: parentId, placement: placement, extra: extra))
+    }
+
+    /// Place a subtree lifted from ANOTHER tree — the clipboard verb.
+    ///
+    /// The same id-remapping contract as `duplicate` (that is the whole
+    /// difference from `place`, which refuses a collision rather than remapping);
+    /// what differs is where the subtree came from, so it arrives as a document
+    /// rather than as an id.
+    @discardableResult
+    public func paste(
+      subtreeJSON: String, parentId: String, placement: Placement, idPrefix: String? = nil
+    ) throws -> String {
+      var extra: [(String, JSONFragment)] = [("subtree", .raw(subtreeJSON))]
+      if let idPrefix { extra.append(("idPrefix", .string(idPrefix))) }
+      return try placementVerb(
+        fuaran_session_paste,
+        request(parentId: parentId, placement: placement, extra: extra))
     }
 
     // ── Placement boundary helpers ───────────────────────────────────────────

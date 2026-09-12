@@ -157,19 +157,35 @@ final class SessionTests: XCTestCase {
       XCTAssertEqual(fed, .rows([]))
     }
 
-    // ── Placement (Phase 833; `move` Phase 1673) ─────────────────────────────
+    // ── Placement (Phase 833; `move` Phase 1673; the other four Phase 1703) ──
     //
-    // A drag-move EXERCISED, not merely declared in a header. The verb existed on
-    // the Rust library surface from Phase 833 and was reachable from nowhere
-    // else: this projection is decode-only, so without the C-ABI entry point the
-    // only way to move a node from Swift was to author the ops by hand — a second
-    // implementation of an algebra this core is the reference for.
+    // All five verbs EXERCISED, not merely declared in a header. They existed on
+    // the Rust library surface from Phase 833 and were reachable from nowhere
+    // else: this projection is decode-only, so without the C-ABI entry points the
+    // only way to place a node from Swift was to author the ops by hand — a
+    // second implementation of an algebra this core is the reference for.
 
+    /// The placement seed, SHARED BYTE-FOR-BYTE with the Kotlin surface's own
+    /// placement leg (`fuaran-core`'s session round-trip). One seed, two hosts:
+    /// the two projections are independent of each other and depend on the same
+    /// core, so a divergence between what they exercise it with would be exactly
+    /// the kind of difference nobody notices until the two answers differ.
+    ///
+    /// `note` is a CHILDLESS kind, and it is here rather than a third Box on
+    /// purpose: the refusals half of this surface — `ChildlessKind` on a place,
+    /// `CannotNudgeRoot` on the root — needs a node that cannot take children and
+    /// a sibling list to nudge within, and a seed that affords only the happy
+    /// path certifies the half nobody gets wrong.
     private var placementTree: String {
       #"""
-      {"id":"root","kind":{"$type":"Box","children":[{"id":"left","kind":{"$type":"Box","children":[{"id":"a","kind":{"$type":"Markdown","text":"A"}},{"id":"b","kind":{"$type":"Markdown","text":"B"}}],"layout":{"$type":"Flex","direction":"Vertical","wrap":false},"role":"Group"}},{"id":"right","kind":{"$type":"Box","children":[],"layout":{"$type":"Flex","direction":"Vertical","wrap":false},"role":"Group"}}],"layout":{"$type":"Flex","direction":"Vertical","wrap":false},"role":"Group"}}
+      {"id":"root","kind":{"$type":"Box","children":[{"id":"left","kind":{"$type":"Box","children":[{"id":"a","kind":{"$type":"Markdown","text":"A"}},{"id":"b","kind":{"$type":"Markdown","text":"B"}}],"layout":{"$type":"Flex","direction":"Vertical","wrap":false},"role":"Group"}},{"id":"right","kind":{"$type":"Box","children":[],"layout":{"$type":"Flex","direction":"Vertical","wrap":false},"role":"Group"}},{"id":"note","kind":{"$type":"Markdown","text":"N"}}],"layout":{"$type":"Flex","direction":"Vertical","wrap":false},"role":"Group"}}
       """#
     }
+
+    /// A canonical wire `Node` document to insert. The tier is decode-only, so a
+    /// caller hands over a document rather than a `Node` — this is what one looks
+    /// like at the call site.
+    private let freshNode = #"{"id":"fresh","kind":{"$type":"Markdown","text":"F"}}"#
 
     /// The ids of a Box's children, read off the session's OWN tree — so what is
     /// asserted is the tree the core holds, never a Swift-side echo of the
@@ -253,6 +269,152 @@ final class SessionTests: XCTestCase {
         // Unescaped, this would have been a `request` parse error instead.
         XCTAssertEqual(e.errorClass, "placement", "got: \(e)")
         XCTAssertEqual(e.code, "NodeNotFound", "got: \(e)")
+      }
+    }
+
+    // ── The other four verbs (Phase 1703) ────────────────────────────────────
+
+    /// `place` inserts a node the tree did not have, in POSITION — the reorder
+    /// the core folds into the same call, which is the whole reason the verb
+    /// exists over a bare `InsertChild` (that op appends, and says nothing about
+    /// where).
+    func testPlaceInsertsANewNodeInPosition() async throws {
+      let session = try FuaranSession(treeJSON: placementTree)
+      let op = try await session.place(childJSON: freshNode, parentId: "left", placement: .before("b"))
+      XCTAssertTrue(op.contains("\"InsertChild\""), "expected an InsertChild op, got: \(op)")
+      XCTAssertTrue(
+        op.contains("\"ReorderChildren\""),
+        "a Before placement must carry the reorder that puts it there, got: \(op)")
+
+      let tree = await session.treeJSON()
+      XCTAssertEqual(try childIds(tree, of: "left"), ["a", "fresh", "b"])
+    }
+
+    /// A place into a kind with no children field is refused BEFORE any op is
+    /// emitted, with the apply-side code pre-stated — what a drop target greys
+    /// itself out on.
+    func testPlaceIntoAChildlessKindIsRefused() async throws {
+      let session = try FuaranSession(treeJSON: placementTree)
+      let before = await session.treeJSON()
+      do {
+        _ = try await session.place(childJSON: freshNode, parentId: "note", placement: .last)
+        XCTFail("placing into a childless kind should throw")
+      } catch let e as FuaranError {
+        XCTAssertEqual(e.errorClass, "placement")
+        XCTAssertEqual(e.code, "ChildlessKind")
+      }
+      let after = await session.treeJSON()
+      XCTAssertEqual(before, after, "a refused place must change nothing")
+    }
+
+    /// `nudge` reorders a node among its OWN siblings — no destination, because
+    /// it never leaves its parent.
+    func testNudgeMovesANodeAmongItsSiblings() async throws {
+      let session = try FuaranSession(treeJSON: placementTree)
+      let op = try await session.nudge(target: "a", delta: 1)
+      XCTAssertTrue(op.contains("\"ReorderChildren\""), "expected a ReorderChildren op, got: \(op)")
+
+      let tree = await session.treeJSON()
+      XCTAssertEqual(try childIds(tree, of: "left"), ["b", "a"])
+    }
+
+    /// The root has no siblings, so nudging it is refused rather than clamped —
+    /// and a held-key repeat past the end is refused the same way, so the caller
+    /// can tell "did not move" from "moved nowhere".
+    func testNudgingTheRootAndNudgingPastTheEndAreBothRefused() async throws {
+      let session = try FuaranSession(treeJSON: placementTree)
+      do {
+        _ = try await session.nudge(target: "root", delta: 1)
+        XCTFail("nudging the root should throw")
+      } catch let e as FuaranError {
+        XCTAssertEqual(e.code, "CannotNudgeRoot")
+      }
+      do {
+        _ = try await session.nudge(target: "a", delta: -1)
+        XCTFail("nudging past the start of the sibling list should throw")
+      } catch let e as FuaranError {
+        XCTAssertEqual(e.errorClass, "placement")
+        XCTAssertEqual(e.code, "NudgeOutOfRange")
+      }
+    }
+
+    /// `duplicate` MINTS: the copy cannot carry the source's id, so the derived
+    /// strategy names it `<oldId>-copy`. That is the property that separates it
+    /// from `move`, which keeps the id and mints nothing.
+    func testDuplicateMintsACopyRatherThanMovingTheSource() async throws {
+      let session = try FuaranSession(treeJSON: placementTree)
+      _ = try await session.duplicate(source: "note", parentId: "right", placement: .last)
+
+      let tree = await session.treeJSON()
+      XCTAssertEqual(try childIds(tree, of: "right"), ["note-copy"])
+      XCTAssertEqual(
+        try childIds(tree, of: "root"), ["left", "right", "note"],
+        "the source must still be where it was — a duplicate is not a move")
+    }
+
+    /// `idPrefix` selects the DETERMINISTIC strategy, so a caller that must
+    /// predict the minted ids can.
+    func testDuplicateUnderAnIdPrefixMintsPredictableIds() async throws {
+      let session = try FuaranSession(treeJSON: placementTree)
+      _ = try await session.duplicate(
+        source: "left", parentId: "right", placement: .last, idPrefix: "dup")
+
+      let tree = await session.treeJSON()
+      XCTAssertEqual(try childIds(tree, of: "right"), ["dup-1"])
+      XCTAssertEqual(
+        try childIds(tree, of: "dup-1"), ["dup-2", "dup-3"],
+        "every id in the clone is minted in traversal order under the prefix")
+    }
+
+    /// `paste` places a subtree from ELSEWHERE, remapping the ids that collide
+    /// with the tree it lands in and preserving the ones that do not. That
+    /// remapping is the whole difference from `place`, which refuses a collision.
+    func testPasteRemapsCollidingIdsAndPreservesTheRest() async throws {
+      let session = try FuaranSession(treeJSON: placementTree)
+      let clipboard = #"""
+        {"id":"tray","kind":{"$type":"Box","children":[{"id":"a","kind":{"$type":"Markdown","text":"A2"}},{"id":"z","kind":{"$type":"Markdown","text":"Z"}}],"layout":{"$type":"Flex","direction":"Vertical","wrap":false},"role":"Group"}}
+        """#
+      _ = try await session.paste(subtreeJSON: clipboard, parentId: "right", placement: .last)
+
+      let tree = await session.treeJSON()
+      XCTAssertEqual(
+        try childIds(tree, of: "right"), ["tray"],
+        "'tray' collides with nothing, so it keeps its id")
+      XCTAssertEqual(
+        try childIds(tree, of: "tray"), ["a-copy", "z"],
+        "'a' collides and is remapped; 'z' does not and is preserved")
+    }
+
+    /// A `place` whose child id ALREADY EXISTS is refused, rather than remapped.
+    /// Stated as a test because it is the one place two verbs of this family
+    /// differ on the same input: `paste` remaps that id and `place` refuses it,
+    /// and a surface that quietly did either would be wrong half the time.
+    func testPlaceRefusesACollidingIdWherePasteWouldRemapIt() async throws {
+      let session = try FuaranSession(treeJSON: placementTree)
+      do {
+        _ = try await session.place(
+          childJSON: #"{"id":"a","kind":{"$type":"Markdown","text":"A2"}}"#,
+          parentId: "right", placement: .last)
+        XCTFail("placing a node whose id is already in the tree should throw")
+      } catch let e as FuaranError {
+        XCTAssertEqual(e.errorClass, "placement")
+        XCTAssertEqual(e.code, "DuplicateId")
+      }
+    }
+
+    /// A malformed node DOCUMENT is judged by the core's parser, not by this
+    /// tier: the splice is not a hole in the encoder, because the decoder that
+    /// owns the judgement is the one that makes it — and it comes back as a
+    /// `request` error, distinct from every `placement` refusal above.
+    func testAMalformedChildDocumentIsARequestError() async throws {
+      let session = try FuaranSession(treeJSON: placementTree)
+      do {
+        _ = try await session.place(
+          childJSON: #"{"id":"broken","kind":{"$type":"NoSuchKind"}}"#,
+          parentId: "right", placement: .last)
+        XCTFail("a malformed child document should throw")
+      } catch let e as FuaranError {
+        XCTAssertEqual(e.errorClass, "request", "got: \(e)")
       }
     }
 

@@ -37,6 +37,11 @@ on:
       # entry a residue edit is invisible to CI, which is the same class of defect as
       # a gate that never triggers.
       - "conformance-residue.txt"
+      # The pinned corpus revision IS gate input too, and more directly than the
+      # residue set: it decides WHICH corpus every gate below reads. A pin moved
+      # without re-running them would be a claim nothing checked.
+      - "corpus-pin.json"
+      - "dev-scripts/**"
       - ".github/workflows/swift-ci.yml"
   pull_request:
     branches: [main]
@@ -49,6 +54,11 @@ on:
       # entry a residue edit is invisible to CI, which is the same class of defect as
       # a gate that never triggers.
       - "conformance-residue.txt"
+      # The pinned corpus revision IS gate input too, and more directly than the
+      # residue set: it decides WHICH corpus every gate below reads. A pin moved
+      # without re-running them would be a claim nothing checked.
+      - "corpus-pin.json"
+      - "dev-scripts/**"
       - ".github/workflows/swift-ci.yml"
   workflow_dispatch:
 
@@ -79,13 +89,63 @@ jobs:
       # path filters mean only a Sources/Tests/Package.swift push runs this
       # workflow at all. Checking the corpus out directly needs neither a sparse
       # path nor the PAT — the repo is public.
+      # ── The corpus is PINNED (Phase 1703) ──────────────────────────────────
+      # `corpus-pin.json` records the one corpus revision this repository's gates
+      # certify against. Before it, both jobs checked the corpus out at whatever
+      # was current, so any corpus-side phase reddened this repository with no
+      # commit of its own — which is not a signal about this code at all, and is
+      # the reason a red here stopped meaning anything for days at a time.
+      #
+      # Full depth: `rev-list --count` needs BOTH ends of the range, and a
+      # depth-1 checkout holds neither the pinned commit nor `origin/main`, so
+      # the drift report would answer "unknown" on every run.
+      - name: Read the pinned corpus revision
+        id: pin
+        run: |
+          # The only 40-character hex run in the file is the commit, so `grep -o`
+          # reads it with no capture group, one less thing to get subtly wrong
+          # between the GNU and BSD tooling on two different runner images.
+          ref=$(grep -o '[0-9a-f]\{40\}' corpus-pin.json | head -1)
+          test -n "$ref" || {
+            echo "::error::corpus-pin.json records no 40-character authorityCommit — the corpus checkout below has nothing to pin to"
+            exit 1
+          }
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "corpus pinned at $ref"
+
       - name: Checkout wire-format-fixtures corpus (render-coverage gate)
         uses: actions/checkout@v4
         with:
           repository: fuaran-ui/fuaran-ui-specification
+          ref: ${{ steps.pin.outputs.ref }}
+          fetch-depth: 0
           path: _corpus
       - name: Place corpus where the tests look (<repo>/../wire-format-fixtures)
         run: mv _corpus "$GITHUB_WORKSPACE/../wire-format-fixtures"
+
+      # ASSERT the checkout is at the pin, then REPORT how far the pin is behind
+      # the corpus's real head. Two different claims, and both are needed: without
+      # the assert, dropping the `ref:` above would silently return this job to
+      # certifying against whatever is current and every gate would stay green;
+      # without the report, the pin would make drift invisible instead of
+      # deliberate, which is a worse trade than the red it replaced.
+      #
+      # Drift is a NOTICE, not a failure. Being behind is the ordinary resting
+      # state between a fixture being authored and the decoder work that adopts
+      # it; moving the pin adopts that vocabulary and belongs in the same
+      # change-set as the adoption.
+      - name: Corpus pin — assert the checkout, report the drift
+        run: |
+          set +e
+          pwsh -NoProfile -File dev-scripts/corpus-pin.ps1 -Authority "$GITHUB_WORKSPACE/../wire-format-fixtures" -Assert
+          rc=$?
+          set -e
+          case "$rc" in
+            0) echo "corpus pin current." ;;
+            2) echo "::notice::the corpus has moved past this repository's pin (see the distance above). Adopting it is a deliberate change-set." ;;
+            3) echo "::error::the corpus checkout is not at the pin — the gates below would certify against a revision this repository has not adopted"; exit 1 ;;
+            *) echo "::warning::the corpus pin could not be measured (exit $rc)" ;;
+          esac
 
       - name: Select Xcode (Swift 6 toolchain — swift-tools 6.0 requires Xcode 16+)
         run: |
@@ -182,13 +242,55 @@ jobs:
           path: fuaran-rs
 
       # Same 2026-07-27 corpus-repo split as the `swift` job above.
+      # ── The corpus is PINNED (Phase 1703) ──────────────────────────────────
+      # `corpus-pin.json` records the one corpus revision this repository's gates
+      # certify against. Before it, both jobs checked the corpus out at whatever
+      # was current, so any corpus-side phase reddened this repository with no
+      # commit of its own — which is not a signal about this code at all, and is
+      # the reason a red here stopped meaning anything for days at a time.
+      #
+      # Full depth: `rev-list --count` needs BOTH ends of the range, and a
+      # depth-1 checkout holds neither the pinned commit nor `origin/main`, so
+      # the drift report would answer "unknown" on every run.
+      - name: Read the pinned corpus revision
+        id: pin
+        run: |
+          # The only 40-character hex run in the file is the commit, so `grep -o`
+          # reads it with no capture group, one less thing to get subtly wrong
+          # between the GNU and BSD tooling on two different runner images.
+          ref=$(grep -o '[0-9a-f]\{40\}' fuaran-swift/corpus-pin.json | head -1)
+          test -n "$ref" || {
+            echo "::error::fuaran-swift/corpus-pin.json records no 40-character authorityCommit — the corpus checkout below has nothing to pin to"
+            exit 1
+          }
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "corpus pinned at $ref"
+
       - name: Checkout wire-format-fixtures corpus (render-coverage gate)
         uses: actions/checkout@v4
         with:
           repository: fuaran-ui/fuaran-ui-specification
+          ref: ${{ steps.pin.outputs.ref }}
+          fetch-depth: 0
           path: _corpus
       - name: Place corpus as the fuaran-swift sibling (<repo>/../wire-format-fixtures)
         run: mv _corpus "$GITHUB_WORKSPACE/wire-format-fixtures"
+
+      # See the same step in the `swift` job for why the assert and the report are
+      # two claims rather than one.
+      - name: Corpus pin — assert the checkout, report the drift
+        working-directory: fuaran-swift
+        run: |
+          set +e
+          pwsh -NoProfile -File dev-scripts/corpus-pin.ps1 -Authority "$GITHUB_WORKSPACE/wire-format-fixtures" -Assert
+          rc=$?
+          set -e
+          case "$rc" in
+            0) echo "corpus pin current." ;;
+            2) echo "::notice::the corpus has moved past this repository's pin (see the distance above). Adopting it is a deliberate change-set." ;;
+            3) echo "::error::the corpus checkout is not at the pin — the gates below would certify against a revision this repository has not adopted"; exit 1 ;;
+            *) echo "::warning::the corpus pin could not be measured (exit $rc)" ;;
+          esac
 
       - name: Select Xcode
         run: |

@@ -218,7 +218,9 @@ final class SessionTests: XCTestCase {
     func testMoveBeforeAnAnchorLandsInPosition() async throws {
       let session = try FuaranSession(treeJSON: placementTree)
       _ = try await session.move(source: "right", parentId: "left", placement: .before("b"))
-      XCTAssertEqual(try childIds(await session.treeJSON(), of: "left"), ["a", "right", "b"])
+      // Bound first: XCTAssert* take AUTOCLOSURES, which cannot carry an `await`.
+      let tree = await session.treeJSON()
+      XCTAssertEqual(try childIds(tree, of: "left"), ["a", "right", "b"])
     }
 
     /// A refusal is TYPED and the held tree is untouched — the pre-stated
@@ -233,7 +235,8 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(e.errorClass, "placement")
         XCTAssertEqual(e.code, "MoveIntoSelf")
       }
-      XCTAssertEqual(before, await session.treeJSON(), "a refused move must change nothing")
+      let after = await session.treeJSON()
+      XCTAssertEqual(before, after, "a refused move must change nothing")
     }
 
     /// The request encoder ESCAPES rather than splicing an id into JSON and

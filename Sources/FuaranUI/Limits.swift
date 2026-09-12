@@ -16,7 +16,12 @@
 // a 25-level node tree, one past the limit, was ACCEPTED outright, so a document every
 // rostered host refuses decoded here.
 
-/// The five §21.1 figures.
+/// The §21 figures — five structural bounds from §21.1, plus the two VALUE bounds §21.8
+/// and §21.9 added later.
+///
+/// The count is not restated here on purpose: it was "five" while the type held six, and
+/// then while it held seven, because a number in prose beside a list is one more thing to
+/// keep in step with the list.
 ///
 /// They are **protocol numbers, not tuning knobs**: a document within them is one every
 /// host MUST decode, and a document beyond them is one every host MUST refuse, with the

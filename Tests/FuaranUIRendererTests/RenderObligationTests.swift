@@ -606,6 +606,309 @@ private func checkUnregisteredCustomLabelled() throws {
   XCTAssertEqual(hashed, placeholder, "an unverifiable hash is not surfaced as a verdict")
 }
 
+// ─── DataGrid — the interactive-row marker (§3.6.24) ──────────────────────────
+
+/// Decode a grid node and hand back its spec, so every subject below is a WIRE
+/// document rather than a record built beside the decoder. §3.6.24's claim is
+/// about what a host emits on the strength of a declaration it read, and a
+/// hand-built spec skips the reading.
+private func gridSpecFrom(_ json: String) throws -> GridSpec {
+  guard case .dataGrid(let spec) = try RenderProjection.decodeNode(json).kind else {
+    throw ObligationFixtureError(message: "expected a DataGrid node from: \(json)")
+  }
+  return spec
+}
+
+/// Raised when a checker's own fixture will not decode. Distinct from a failed
+/// assertion: the subject never existed, rather than existed and disagreed.
+private struct ObligationFixtureError: Error { let message: String }
+
+/// Two rows, so "every row" and "no row" are both observable. A single-row grid
+/// satisfies a host that marks the first row only.
+private let twoRows: [JSON] = [
+  .object(["reference": .string("S-1")]),
+  .object(["reference": .string("S-2")]),
+]
+
+private func checkInteractiveRowOnlyWithAction() throws {
+  // §3.6.24's own example document, verbatim in shape: a bound grid DECLARING
+  // a row action.
+  let declaring = try gridSpecFrom(
+    #"""
+    {"id":"grid-clickable","kind":{"$type":"DataGrid","columns":[{"field":"reference","kind":{"$type":"Text"},"label":"Reference"}],"onRowClick":"<closure>","rowKeyField":"reference","source":{"$type":"Query","name":"settlements"}}}
+    """#)
+  XCTAssertNotNil(
+    declaring.onRowClick,
+    "the `<closure>` sentinel carries exactly one readable fact — that a row action was declared")
+
+  // RULE 1, the "if" half. Every rendered row is marked, and the markers line
+  // up one-for-one with the rows on screen.
+  let marked = gridRowInteractivity(declaring, rows: .rows(twoRows))
+  XCTAssertEqual(
+    marked.markers, [true, true],
+    "a bound row carries the marker where the grid declares a row action — on every row, not the first")
+  XCTAssertTrue(marked.rowActionDeclared)
+  XCTAssertFalse(marked.marksNoRow)
+
+  // RULE 1, the "only where" half — the polarity `nodes/grid-1.json` pins: its
+  // bytes carry no `onRowClick` key at all.
+  let silent = try gridSpecFrom(
+    #"""
+    {"id":"grid-1","kind":{"$type":"DataGrid","columns":[{"kind":{"$type":"Text"},"label":"Channel","value":"<closure>"}],"rowKey":"<closure>","source":{"$type":"Static","value":[]}}}
+    """#)
+  XCTAssertNil(silent.onRowClick, "the omission polarity — the corpus grid declares no row action")
+  let unmarked = gridRowInteractivity(silent, rows: .rows(twoRows))
+  XCTAssertEqual(
+    unmarked.markers, [false, false],
+    "a grid declaring no row action carries the marker on NO row — the pointer affordance promises a click exactly where the document declared one")
+  XCTAssertTrue(unmarked.marksNoRow)
+
+  // RULE 2 — the one a host is most likely to get wrong in a way that looks
+  // right. A `staticRows` grid DECLARING `onRowClick` marks no row whatever it
+  // declares: the static mode honours no row action in any tier, because its
+  // cells are `TextSource`s rather than the row values an action is applied to.
+  // The subject declares one deliberately; a host reading `onRowClick != nil`
+  // and stopping there passes every assertion above and fails here.
+  let staticDeclaring = try gridSpecFrom(
+    #"""
+    {"id":"table-clickable","kind":{"$type":"DataGrid","columns":[],"onRowClick":"<closure>","source":{"$type":"Static","value":[]},"staticRows":{"headers":["Term","Definition"],"rows":[["MVU","Model-View-Update"],["DSL","Domain-specific language"]]}}}
+    """#)
+  XCTAssertNotNil(staticDeclaring.onRowClick, "the document DOES declare one — that is the trap")
+  let staticMarkers = gridRowInteractivity(staticDeclaring, rows: .notResolved)
+  XCTAssertEqual(
+    staticMarkers.markers, [false, false],
+    "a staticRows grid carries the marker on no row, whatever it declares — marking there would promise a click no tier can deliver")
+  XCTAssertTrue(
+    staticMarkers.rowActionDeclared,
+    "…and the declaration is still REPORTED, because rule 2 is precisely the divergence between what the document declared and what a row may carry")
+  XCTAssertTrue(staticMarkers.marksNoRow)
+
+  // …and the same grid without the declaration is unchanged, so the rule is not
+  // being satisfied by a static grid marking nothing for some other reason.
+  let staticSilent = try gridSpecFrom(
+    #"""
+    {"id":"table-1","kind":{"$type":"DataGrid","columns":[],"source":{"$type":"Static","value":[]},"staticRows":{"headers":["Term","Definition"],"rows":[["MVU","Model-View-Update"],["DSL","Domain-specific language"]]}}}
+    """#)
+  XCTAssertEqual(gridRowInteractivity(staticSilent, rows: .rows(twoRows)).markers, [false, false])
+
+  // RULE 3 — this surface renders the bound leg as a placeholder while the feed
+  // is unresolved, so it owes the vacuous half there: no row, therefore no
+  // marker. EMPTY rather than all-`false`, because a `false` would assert a row
+  // that does not exist.
+  for placeholder in [ResolvedRows.notResolved, .noRowSource] {
+    let vacuous = gridRowInteractivity(declaring, rows: placeholder)
+    XCTAssertEqual(
+      vacuous.markers, [],
+      "a placeholder leg emits no row and so no marker — \(placeholder)")
+    XCTAssertTrue(vacuous.marksNoRow)
+  }
+  XCTAssertEqual(
+    gridRowInteractivity(declaring, rows: .rows([])).markers, [],
+    "an empty resolved feed renders no row either")
+
+  // What is NOT claimed: that a click reaches the declared action here. The
+  // action is a closure the wire cannot carry, so no arm on this surface can
+  // invoke it — and the field says so rather than leaving a reader unable to
+  // tell a decision from an oversight.
+  XCTAssertFalse(marked.activates, "the marker says the DOCUMENT declared a row action, no more")
+  XCTAssertFalse(unmarked.activates)
+  XCTAssertFalse(staticMarkers.activates)
+}
+
+// ─── Sparkline — float-sequence resolution (§24.7) ────────────────────────────
+
+/// §24.7's named subject: the corpus's bound-source sparkline —
+/// `nodes/state-absent-default.json`, node `absent-default-sparkline`, whose
+/// `source` is a `Binding.State` on `$state.series`.
+///
+/// Read from the corpus where it is present, so the claim is asserted over the
+/// shape every sibling surface answers for. Where it is not — a standalone
+/// checkout, or `FUARAN_RENDER_FIDELITY` pointed at a scratch artefact for the
+/// go-red proof — the identical binding is built here rather than the checker
+/// skipping: the claim is about THIS surface's resolver, and a checker that
+/// quietly asserts nothing is the silent pass the whole mechanism replaces. The
+/// shape is pinned by the caller either way.
+private func floatSeqSubject() -> Binding {
+  let node =
+    RenderFidelityArtefact.url
+    .deletingLastPathComponent()
+    .appendingPathComponent("nodes")
+    .appendingPathComponent("state-absent-default.json")
+  guard let text = try? String(contentsOf: node, encoding: .utf8),
+    let root = try? RenderProjection.decodeNode(text),
+    case .box(let box) = root.kind,
+    let spark = box.children.first(where: { $0.id == "absent-default-sparkline" }),
+    case .sparkline(let spec) = spark.kind
+  else {
+    return .state(key: "series", defaultValue: .floatSeq([]))
+  }
+  return spec.source
+}
+
+/// The subject's state key, with its shape asserted — both checkers begin here,
+/// so neither can drift onto a binding §24.7 does not name.
+private func floatSeqStateKey() -> String? {
+  guard case .state(let key, _) = floatSeqSubject() else {
+    XCTFail("§24.7's subject is a `Binding.State`; this surface resolved something else")
+    return nil
+  }
+  XCTAssertEqual(key, "series", "the corpus's bound-source sparkline reads $state.series")
+  return key
+}
+
+private func checkFloatSeqReadsElementWise() throws {
+  let subject = floatSeqSubject()
+  guard let key = floatSeqStateKey() else { return }
+
+  /// A HOST STORE, which is the only place a foreign element can exist: a
+  /// float-sequence slot TYPES its elements at decode, so no conformant
+  /// document can carry one and no fixture can express this.
+  func read(_ items: [JSON]) -> [Double] {
+    BindingContext(state: [key: .array(items)]).resolveNumbers(subject)
+  }
+
+  let fed: [JSON] = [
+    .number(1), .string("oops"), .number(3), .bool(true), .null, .object([:]), .number(6),
+  ]
+  let readings = read(fed)
+
+  // EXACTLY ONE READING PER ELEMENT. The count is where two of the three named
+  // failures show: a host that DROPS the foreign elements returns three
+  // readings, one that TRUNCATES at the first returns one.
+  XCTAssertEqual(
+    readings.count, fed.count,
+    "one reading per element — the host neither drops a foreign element nor truncates the series at it")
+  XCTAssertFalse(
+    readings.isEmpty,
+    "…nor abandons the whole series because of one element it could not read")
+  // A violating host has ALREADY failed above; stop before indexing, so it fails
+  // as a named assertion rather than as an out-of-range trap that takes the
+  // whole runner down and reports the claim as a crash instead of a disagreement.
+  guard readings.count == fed.count else { return }
+
+  // POSITION, which a count alone cannot check: a dropped element does not
+  // leave a gap, it slides every later reading one place left — so every
+  // surviving number is still present, at the wrong index, and the chart looks
+  // entirely plausible showing the wrong points at the wrong places.
+  XCTAssertEqual(readings[0], 1)
+  XCTAssertTrue(readings[1].isNaN, "a non-number reads as NaN IN ITS OWN POSITION")
+  XCTAssertEqual(
+    readings[2], 3,
+    "…and 3 stays at index 2; under a dropping read it would sit at index 1, which is the failure this assertion exists for")
+  XCTAssertTrue(readings[3].isNaN, "a boolean is not a number")
+  XCTAssertTrue(readings[4].isNaN, "a null is not a number")
+  XCTAssertTrue(readings[5].isNaN, "an object is not a number")
+  XCTAssertEqual(readings[6], 6, "the tail is intact")
+
+  // A LEADING foreign element, which a host that skips until the first number
+  // passes the run above on.
+  let leading = read([.string("x"), .number(2)])
+  XCTAssertEqual(leading.count, 2)
+  if leading.count == 2 {
+    XCTAssertTrue(leading[0].isNaN)
+    XCTAssertEqual(leading[1], 2, "the first NUMBER is at index 1, where the document put it")
+  }
+
+  // A TRAILING one, which a host that trims the tail passes both of the above on.
+  let trailing = read([.number(2), .string("x")])
+  XCTAssertEqual(trailing.count, 2, "a trailing unreadable element is a reading, not a terminator")
+  if trailing.count == 2 { XCTAssertTrue(trailing[1].isNaN) }
+
+  // A wholly unreadable series still yields one reading per element — the
+  // abandonment failure in its purest form, and the one that reads to a user as
+  // "no data" when what is true is "no numbers here".
+  let none = read([.string("a"), .string("b"), .string("c")])
+  XCTAssertEqual(none.count, 3)
+  XCTAssertTrue(none.allSatisfy { $0.isNaN })
+
+  // What the rule does NOT govern, stated so it is not read as a breach: a host
+  // value that is not a sequence at all resolves to no sequence, so it reads no
+  // elements and therefore drops none. §24.1's ordinary unresolved case.
+  XCTAssertEqual(
+    BindingContext(state: [key: .number(3)]).resolveNumbers(subject), [],
+    "a non-sequence value reads no elements — unresolved, not shortened")
+  XCTAssertEqual(
+    BindingContext(state: [:]).resolveNumbers(subject), [],
+    "an unwritten slot with no declared default is unresolved (§24.8)")
+
+  // And the reading reaches the PICTURE element-wise: the lowering draws one
+  // point per element, so a dropped element would move every later point.
+  guard let drawing = sparklineDrawing(series: read([.number(0), .string("x"), .number(10)])),
+    case .polyline(let points, _)? = drawing.shapes.first
+  else { return XCTFail("expected a polyline for a three-element series") }
+  XCTAssertEqual(points.count, 3, "three elements, three points")
+  XCTAssertEqual(points.map(\.x), [0, 50, 100], "the middle point keeps its position on the x axis")
+}
+
+private func checkFloatSeqAcceptSetClosed() throws {
+  let subject = floatSeqSubject()
+  guard let key = floatSeqStateKey() else { return }
+
+  func read(_ items: [JSON]) -> [Double] {
+    BindingContext(state: [key: .array(items)]).resolveNumbers(subject)
+  }
+
+  // The set, in full: a JSON number and §7's three quoted sentinel spellings,
+  // each reading as its OWN value rather than merely being admitted.
+  let admitted = read([.number(2.5), .string("NaN"), .string("Infinity"), .string("-Infinity")])
+  XCTAssertEqual(admitted.count, 4)
+  // Guarded, so a host that reads the wrong NUMBER of elements fails as the
+  // named count disagreement above rather than as an out-of-range trap that
+  // takes the runner down and reports the claim as a crash.
+  if admitted.count == 4 {
+    XCTAssertEqual(admitted[0], 2.5)
+    XCTAssertTrue(admitted[1].isNaN)
+    XCTAssertEqual(admitted[2], .infinity, "the sentinel is the value, not merely a non-NaN")
+    XCTAssertEqual(admitted[3], -.infinity)
+  }
+
+  // `"3.5"` is NOT a number at this slot — the claim's own example. The decode
+  // path at this same slot refuses `[1,"3.5",3]` outright, so a document could
+  // not carry the value a coercing resolver would accept, and the two halves of
+  // one slot would disagree about what a number is.
+  let decimal = read([.number(1), .string("3.5"), .number(3)])
+  XCTAssertEqual(decimal.count, 3, "…and it is still a reading in its own position")
+  if decimal.count == 3 {
+    XCTAssertTrue(decimal[1].isNaN, "a decimal string is not a number here")
+  }
+
+  // Every other spelling this RUNTIME's own float parser would take. Admitting
+  // any of them would make the accept set Swift's rather than the format's —
+  // and Go, JavaScript and Python each take a different set, so one store would
+  // draw different pictures on two conformant hosts.
+  let runtimeSpellings = [
+    "3.5", "0x1p-2", "1e3", "1_0", " 1 ", "", "+1", "3.", "03", "-0x10p0", "\t2",
+  ]
+  for spelling in runtimeSpellings {
+    let r = read([.string(spelling)])
+    XCTAssertEqual(r.count, 1, "\(spelling): read element-wise")
+    guard r.count == 1 else { continue }
+    XCTAssertTrue(
+      r[0].isNaN, "\"\(spelling)\" is outside the format's accept set and must read as NaN")
+  }
+
+  // CASE, on the spellings where the two readings are distinguishable. A
+  // case-insensitive reader returns ±∞ for these where the closed set returns
+  // NaN; on `"nan"` both readings are NaN, so that spelling could never have
+  // told the two apart and is not what this asserts.
+  for miscased in ["infinity", "INFINITY", "Inf", "inf", "+Infinity", "-inf", "-infinity"] {
+    let r = read([.string(miscased)])
+    XCTAssertEqual(r.count, 1, "\(miscased): read element-wise")
+    guard r.count == 1 else { continue }
+    XCTAssertFalse(
+      r[0].isInfinite,
+      "\"\(miscased)\" is not one of the three sentinel spellings — the set is closed, and case is part of the spelling")
+    XCTAssertTrue(r[0].isNaN)
+  }
+
+  // Non-string, non-number JSON is outside the set too: `true` is not 1.
+  let structural = read([.bool(true), .bool(false), .null, .array([.number(1)]), .object([:])])
+  XCTAssertEqual(structural.count, 5)
+  XCTAssertTrue(
+    structural.allSatisfy { $0.isNaN },
+    "a boolean, a null and a container are not numbers at a float-sequence slot")
+}
+
 // ─── The registry ─────────────────────────────────────────────────────────────
 
 /// Which (kind, claim) pairs this surface asserts, and how. Keyed by the claim's
@@ -631,6 +934,9 @@ private let checkers: [String: @Sendable () throws -> Void] = [
   "Image/refused-src-no-affordance": checkRefusedSrcNoAffordance,
   "Image/srcset-ascending-by-width": checkSrcSetAscendingByWidth,
   "Custom/unregistered-custom-labelled": checkUnregisteredCustomLabelled,
+  "DataGrid/interactive-row-only-with-action": checkInteractiveRowOnlyWithAction,
+  "Sparkline/float-seq-reads-element-wise": checkFloatSeqReadsElementWise,
+  "Sparkline/float-seq-accept-set-closed": checkFloatSeqAcceptSetClosed,
 ]
 
 /// Obligations this surface declares it does NOT check, each with a reason.
@@ -900,6 +1206,15 @@ final class RenderObligationTests: XCTestCase {
   func testOwesCustomUnregisteredCustomLabelled() throws {
     try run("Custom/unregistered-custom-labelled")
   }
+  func testOwesDataGridInteractiveRowOnlyWithAction() throws {
+    try run("DataGrid/interactive-row-only-with-action")
+  }
+  func testOwesSparklineFloatSeqReadsElementWise() throws {
+    try run("Sparkline/float-seq-reads-element-wise")
+  }
+  func testOwesSparklineFloatSeqAcceptSetClosed() throws {
+    try run("Sparkline/float-seq-accept-set-closed")
+  }
 
   /// Every registered checker has a method above. Without this, adding a checker
   /// to the registry and forgetting its method would leave the claim reported as
@@ -915,6 +1230,8 @@ final class RenderObligationTests: XCTestCase {
       "Image/anchor-affordance-on-expandable",
       "Image/refused-src-no-affordance", "Image/srcset-ascending-by-width",
       "Custom/unregistered-custom-labelled",
+      "DataGrid/interactive-row-only-with-action",
+      "Sparkline/float-seq-reads-element-wise", "Sparkline/float-seq-accept-set-closed",
     ])
     XCTAssertEqual(
       Set(checkers.keys).symmetricDifference(named), [],

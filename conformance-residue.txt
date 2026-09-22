@@ -47,9 +47,25 @@
 # modelled and the floor follows the same obligation's reasoning — record THAT a
 # ceiling was declared, never its value — pinned by UploadCeilingTests.swift.
 #
-# Verified against wire-format-fixtures/render-fidelity.json (20 declared
-# obligations), the 15 registered `checkers` and the 3 `declaredExemptions`:
-# 20 - 15 - 3 = these two. RENDER-PROJECTION.md states the same pair.
+# THE SET DID NOT GROW AT PHASES 1701 / 1704 EITHER, and the artefact grew by
+# three: `DataGrid/interactive-row-only-with-action` (§3.6.24) and the two
+# `Sparkline` float-sequence claims (§24.7). All three are ASSERTED — real
+# checkers, one per claim, in RenderObligationTests.swift — rather than listed
+# here, because none of them met either test for this file. The grid claim is
+# about a per-row MARKER, and a marker is exactly what a surface with no class
+# vocabulary can still emit in its own idiom (§3.6.24 says so on its face), so
+# `gridRowInteractivity` projects one per rendered row and the arm consumes it.
+# The two float-sequence claims are about THIS SURFACE'S OWN RESOLVER — the slot
+# was modelled and read already — and one of them found a live defect rather
+# than an unadopted slot: the state-fed reader used `compactMap`, which DROPPED
+# every foreign element, and a dropped element does not leave a gap at its index,
+# it slides every later reading one place left. A residue line there would have
+# capped a wrong picture rather than an unmodelled slot, which is the distinction
+# the header above draws.
+#
+# Verified against wire-format-fixtures/render-fidelity.json (23 declared
+# obligations), the 18 registered `checkers` and the 3 `declaredExemptions`:
+# 23 - 18 - 3 = these two. RENDER-PROJECTION.md states the same pair.
 [obligation] FileUpload/picker-always-present
 [obligation] Modal/aria-modal-only-when-blocking
 

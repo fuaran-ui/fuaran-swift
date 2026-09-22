@@ -551,6 +551,66 @@ written out rather than delegated to a standard-library reduction because NaN or
 language's own choice and the sentinel vector pins the arithmetic; do not "simplify" it to
 `series.min()`.
 
+## DataGrid — the interactive-row marker (§3.6.24)
+
+`GridSpec.onRowClick` is a closure-bearing slot, so it rides the wire as the `"<closure>"` sentinel
+and carries exactly one readable fact: **this grid declares a row action.** The projection is
+`Sources/FuaranUIRenderer/GridRowInteractivity.swift`; three decisions live here.
+
+- **The marker is PER RENDERED ROW, not per grid**, because the obligation is stated per row — "a
+  grid declaring none carries it on no row" is a claim about rows, and one boolean for the grid
+  could not express a grid that rendered some. `GridRowInteractivity.markers` is therefore one entry
+  per row on screen, in render order.
+- **The projection takes the WHOLE SPEC, not `onRowClick != nil`**, and that is rule 2 rather than
+  a stylistic choice. A `staticRows` grid marks no row *whatever it declares*: its cells are
+  `TextSource`s rather than the row values an action is applied to, so there is nothing for a host
+  to invoke, and marking there would promise a click no tier can deliver. That is the rule a host
+  gets wrong in a way that looks right — the obvious code reads the declaration and never looks at
+  the mode — so the static branch is checked FIRST and unconditionally. The arm asks the projection
+  rather than reading `onRowClick` itself, so no edit in the view can lose the rule.
+- **`activates` is always `false`, and it is a field rather than an omission** — the
+  `TooltipProjection.focusStopClaimed` reasoning. The marker says the DOCUMENT declared a row
+  action, never that a click reaches one here: the action is a closure the wire cannot carry. The
+  placeholder legs (`Loading…`, `(no row source)`) render no row, so the markers array is EMPTY
+  there rather than all-`false` — a `false` would assert a row that does not exist, and §3.6.24's
+  rule 3 is satisfied vacuously and honestly.
+
+**Forward-coupling.** A change to the rules, to what the marker is on this surface, or to which legs
+render rows updates this section, `GridRowInteractivity.swift`, the `RenderDataGrid` arm in
+`FuaranNode.swift`, and the `DataGrid/interactive-row-only-with-action` checker in
+`Tests/FuaranUIRendererTests/RenderObligationTests.swift` in the same change.
+
+## Float-sequence resolution — one reading per element, on a CLOSED accept set (§24.7)
+
+`BindingContext.resolveNumbers` reads a float-sequence slot. §24.7 governs what it does with a value
+the HOST wrote, which is the only place a foreign element can exist: the decode path at this slot
+types its elements and refuses one outright, so no conformant document can carry it and no fixture
+can express it. Two normative claims, and this surface failed the first until they were asserted.
+
+- **Exactly one reading per element.** A host must not drop a foreign element, truncate the series
+  at it, or abandon the series because of it; it reads as NaN **in its own position**. The read used
+  `compactMap`, which dropped — and a dropped element does not leave a gap at its index, it slides
+  every later reading one place left, so the chart is not missing a point, it is showing the wrong
+  points at the wrong places and looking entirely plausible doing it.
+- **The accept set is CLOSED**: a JSON number, or one of §7's three quoted sentinel spellings
+  `"NaN"` / `"Infinity"` / `"-Infinity"`, case included. `"3.5"` is NOT a number here. Admitting any
+  string Swift's own `Double(_:)` takes would make the accept set this RUNTIME's rather than the
+  format's — it takes `"0x1p-2"`, `"1_0"`, `"inf"` and `"+1"`, and every other host's parser takes a
+  different set — so one store would draw different pictures on two conformant surfaces. It would
+  also contradict the decode path at the same slot, and the two halves of one slot would disagree
+  about what a number is.
+
+The two are separate claims because a host can satisfy either alone: one that reads element-wise
+while coercing `"3.5"` passes the first and fails the second, which is exactly what the go-red proof
+exercises. A value that is not a sequence at all reads NO elements — §24.1's ordinary unresolved
+case, not a breach. Nothing here says how a NaN reading DRAWS; that is `SparklineLowering.swift`'s
+business and the shared goldens pin it.
+
+**Forward-coupling.** A change to the element rule or the accept set is a change to a SHARED
+contract: it moves in the specification and in every conformant host, never here alone. It updates
+this section, `floatSeqElement` in `BindingContext.swift`, and the two `Sparkline/float-seq-*`
+checkers in `Tests/FuaranUIRendererTests/RenderObligationTests.swift` in the same change.
+
 ## Cross-repo dependencies
 
 The pure-Swift `FuaranUI` render projection has no upstream dependency on any other sibling. At test

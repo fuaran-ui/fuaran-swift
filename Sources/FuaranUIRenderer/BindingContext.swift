@@ -149,20 +149,60 @@ public struct BindingContext: Sendable {
     }
   }
 
-  /// A raw JSON array read as a series, honouring §7's three sentinel spellings
-  /// EXACTLY — the same tokens the decoder's float reader admits, so a series
-  /// that arrived through a host state slot reads identically to one that
-  /// arrived through the typed wire slot.
+  /// A raw JSON array read as a series — **one reading per element**
+  /// (WIRE_FORMAT.md §24.7).
+  ///
+  /// A value the host wrote is not a wire document: the decode path at a
+  /// float-sequence slot TYPES its elements and refuses a foreign one outright,
+  /// so the only place a foreign element can exist is a host store, and this is
+  /// where it arrives. §24.7 says what happens to it, and the rule is the
+  /// element rule: **a host MUST NOT drop such an element, truncate the sequence
+  /// at it, or abandon the whole sequence because of it.**
+  ///
+  /// A `compactMap` here — which is what this read was until the obligation
+  /// landed — does the first of the three, and it is the most misleading of
+  /// them: a series index IS a position, so dropping element 1 does not leave a
+  /// gap at 1, it slides every later reading one place left. The chart is then
+  /// not missing a point, it is showing the wrong points at the wrong places,
+  /// and it looks entirely plausible doing it. The sentinel says "there is no
+  /// number here" in the position where the number is not, which is the only
+  /// answer that neither invents data nor destroys it.
+  ///
+  /// A value that is not an array at all reads as NO series rather than as a
+  /// one-element one. That is the ordinary unresolved case §24.1 leaves open —
+  /// the host holds something that is not a sequence, so no element is read and
+  /// none is dropped — and it is distinct from the case this rule governs.
   private func jsonNumbers(_ value: JSON) -> [Double] {
     guard case .array(let items) = value else { return [] }
-    return items.compactMap { item in
-      switch item {
-      case .number(let n): return n
-      case .string("NaN"): return Double.nan
-      case .string("Infinity"): return Double.infinity
-      case .string("-Infinity"): return -Double.infinity
-      default: return nil
-      }
+    return items.map(floatSeqElement)
+  }
+
+  /// One element of a float sequence, read by §7's rule for a float.
+  ///
+  /// **The accept set is CLOSED**: a JSON number, or one of the three quoted
+  /// sentinel spellings `"NaN"` / `"Infinity"` / `"-Infinity"`, exactly as the
+  /// decoder's float reader admits them. Anything else reads as NaN.
+  ///
+  /// A decimal string such as `"3.5"` is therefore NOT a number here, and the
+  /// temptation to admit it is the whole reason the claim is written down.
+  /// Accepting any string this runtime's own `Double(_:)` accepts would make
+  /// the accept set SWIFT's rather than the format's — it takes `"0x1p-2"`,
+  /// `"1_0"`, `"inf"` and `"+1"`, none of which any other host's parser takes
+  /// the same way — so one store would draw different pictures on two
+  /// conformant surfaces. It would also contradict the DECODE path at this same
+  /// slot, which refuses `[1,"3.5",3]` outright, so a document could not carry
+  /// the value this resolver would accept and the two halves of one slot would
+  /// disagree about what a number is.
+  ///
+  /// Exhaustive with no `default`, so a new `JSON` case is a build error here
+  /// rather than silently joining the sentinel branch.
+  private func floatSeqElement(_ item: JSON) -> Double {
+    switch item {
+    case .number(let n): return n
+    case .string("NaN"): return Double.nan
+    case .string("Infinity"): return Double.infinity
+    case .string("-Infinity"): return -Double.infinity
+    case .null, .bool, .string, .array, .object: return Double.nan
     }
   }
 

@@ -1508,10 +1508,46 @@
 
   // ── Visualisation ─────────────────────────────────────────────────────────
 
+  /// §3.6.24's marker, in this surface's idiom.
+  ///
+  /// The reference tiers emit a class a stylesheet keys a pointer cursor on.
+  /// There is no class vocabulary here, so the marker is a faint row fill plus a
+  /// whole-row hit region — the smallest honest way to say "this row can be
+  /// activated" on a view tree.
+  ///
+  /// **No gesture is attached, deliberately.** The declared action is a closure
+  /// the wire cannot carry, so there is nothing for a tap to invoke; §3.6.24
+  /// admits exactly that ("the marker says the DOCUMENT declared a row action,
+  /// not that a click will reach one in the tier you are looking at"). An
+  /// unmarked row is left byte-identical to what it rendered before — the
+  /// modifier applies nothing at all — so the marker's ABSENCE is as observable
+  /// as its presence.
+  private struct InteractiveRow: ViewModifier {
+    let marked: Bool
+    func body(content: Content) -> some View {
+      if marked {
+        content
+          .contentShape(Rectangle())
+          .background(Color.gray.opacity(0.08))
+      } else {
+        content
+      }
+    }
+  }
+
   private struct RenderDataGrid: View {
     let k: GridSpec
     let nodeId: String
     let ctx: BindingContext
+
+    /// §3.6.24 — one marker per RENDERED row. The arm asks the projection
+    /// rather than reading `onRowClick` itself, so the static-mode rule (rule 2)
+    /// cannot be lost by an edit here: on that leg every marker is `false` by
+    /// construction and the modifier below is provably a no-op.
+    private var interactivity: GridRowInteractivity {
+      gridRowInteractivity(k, rows: ctx.rows(for: nodeId))
+    }
+
     var body: some View {
       VStack(alignment: .leading, spacing: 2) {
         HStack(spacing: 12) {
@@ -1527,6 +1563,7 @@
                 Text(ctx.resolveText(staticRows.rows[r][ci])).font(.caption)
               }
             }
+            .modifier(InteractiveRow(marked: interactivity.markers[r]))
           }
         } else {
           // Phase 752 — data-bound rows, seeded by the host from the core's
@@ -1543,6 +1580,7 @@
                   RenderGridCell(column: k.columns[ci], row: rows[r], ctx: ctx)
                 }
               }
+              .modifier(InteractiveRow(marked: interactivity.markers[r]))
             }
           case .notResolved:
             Text("Loading…").font(.caption2).foregroundStyle(.secondary)

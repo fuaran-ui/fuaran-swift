@@ -564,10 +564,41 @@ develops on discovering it in production.
   it, including the one assertion that can actually fail — that no digit ever
   reaches the marker.
 - **The render-obligation roster is short by two claims**, down from nine. The
-  artefact declares twenty; this surface registers fifteen checkers and three
-  declared exemptions. The two that remain — `FileUpload/picker-always-present`
+  artefact declares twenty-three; this surface registers eighteen checkers and
+  three declared exemptions. The two that remain — `FileUpload/picker-always-present`
   and `Modal/aria-modal-only-when-blocking` — report as *unchecked with no checker
   registered*, and they are deliberately left that way rather than exempted.
+
+  **Three claims arrived with Phases 1701 and 1704 and all three are ASSERTED**,
+  which is why the pair above did not become a set of five.
+  `DataGrid/interactive-row-only-with-action` (§3.6.24) is about a per-row
+  MARKER, and a marker is the one document-shaped thing a surface with no class
+  vocabulary can still emit in its own idiom — the section states the obligation
+  that way on its face — so `gridRowInteractivity` projects one boolean per
+  RENDERED row and the grid arm consumes it. It is per-row rather than per-grid
+  because the claim is stated per row, and it takes the whole spec rather than a
+  bare `onRowClick != nil` because rule 2 is the one a host gets wrong while
+  looking right: a `staticRows` grid marks no row *whatever it declares*, its
+  cells being `TextSource`s rather than the row values an action is applied to.
+  Rule 3 is owed vacuously on the placeholder legs — `Loading…` and
+  `(no row source)` render no row, so the marker array is EMPTY there rather
+  than all-`false`.
+
+  **The two `Sparkline` float-sequence claims (§24.7) found a live defect**,
+  which is the more useful half of the story. They are about this surface's own
+  RESOLVER rather than about an unmodelled slot, and the state-fed read used
+  `compactMap` — so every element that was not a number or one of §7's three
+  sentinels was silently DROPPED. A dropped element does not leave a gap at its
+  index; it slides every later reading one place left, so the chart was not
+  missing a point, it was showing the wrong points at the wrong places and
+  looking entirely plausible doing it. It reads element-wise now, with the
+  accept set closed to a JSON number and the three sentinel spellings exactly —
+  `"3.5"` is not a number at this slot, because the decode path at the same slot
+  refuses it outright and a resolver that admitted more would make the accept
+  set Swift's rather than the format's. The two are separate claims because a
+  host can satisfy either alone, and the go-red proof exercises exactly that
+  separation: a coercing-but-element-wise read fails the second and passes the
+  first.
 
   **The twentieth claim arrived with Phase 1548 and is the third EXEMPTION.**
   `FileUpload/ceiling-recorded-never-enforced` is about a marker *attribute* on

@@ -309,7 +309,21 @@ public struct Agg: Equatable, Sendable {
   }
 }
 
+/// A sort key, used by both the `sort` step's `by` and the `window` step's
+/// `orderBy`.
+///
+/// The WIRE member is `column` (canonical since substrate 0.28.0), with the
+/// pre-rename `col` as its decode alias and a key carrying both refused. The
+/// IN-MEMORY member below deliberately keeps the name `col`: this surface
+/// decodes and never encodes, so the stored name binds no wire contract, while
+/// renaming a public member of a shipped library IS a source break for every
+/// consumer — and this phase's stability impact is additive. The wire
+/// vocabulary lives at the decode site (`Decode.sortKey`), which is also where
+/// the alias and the both-present refusal are; `ColPair`'s `a` / `b` already
+/// read this way.
 public struct SortKey: Equatable, Sendable {
+  /// The column this key orders by — decoded from the wire's `column` (or its
+  /// `col` alias).
   public var col: String
   public var dir: SortDir
   public init(col: String, dir: SortDir) {
@@ -320,6 +334,10 @@ public struct SortKey: Equatable, Sendable {
 
 public enum TransformStep: Equatable, Sendable {
   case filter(pred: ColExpr)
+  /// A projection. The WIRE member is `columns` (canonical since substrate
+  /// 0.28.0), with the pre-rename `cols` as its decode alias and a step
+  /// carrying both refused; the label below keeps its shipped spelling for the
+  /// reason given on `SortKey`.
   case project(cols: [ColPair])
   case derive(name: String, expr: ColExpr)
   case groupBy(keys: [String], aggs: [Agg])

@@ -13,6 +13,51 @@ extension Decode {
     return v
   }
 
+  // ── RENAMED pipeline members (substrate 0.28.0) ───────────────────────────
+  //
+  // A member the substrate RENAMED: a `project` step's `cols` became `columns`,
+  // and a sort key's / a window frame-ordering entry's `col` became `column`.
+  // The legacy spelling stays a decode alias, and a step carrying BOTH is
+  // REFUSED.
+  //
+  // This is deliberately NOT the §3.6 lenient-alias rule in `reqAliased`, whose
+  // documented resolution is "the canonical name always wins when both are
+  // present". That rule is safe for a lenient alias, which is a FOREIGN
+  // vocabulary's spelling for a slot that has only ever had one canonical name,
+  // so the two can only ever have meant the same thing. A RENAME alias is the
+  // same author's own vocabulary at two versions of it, and a document carrying
+  // both is ambiguous in a way no reading of it resolves — the corpus's two
+  // reject fixtures carry DIFFERENT values under the two spellings, so
+  // canonical-wins would silently project or sort by a column the author may
+  // never have meant, which is exactly the quiet failure this arm exists to
+  // avoid.
+  //
+  // The oracle is the shared corpus, not another host's code:
+  //   reject/reject-transform-project-columns-and-cols.json   → WRONG_TYPE
+  //   reject/reject-transform-sort-key-column-and-col.json    → WRONG_TYPE
+  //   lenient/lenient-transform-column-member-legacy.json     → legacy accepted
+  // both refused at a path under `$.kind.source.pipeline`.
+  //
+  // The `col` EXPRESSION TAG (`{"$type":"col","name":…}`) and the `Grid` /
+  // `Masonry` layouts' integer `cols` are NOT member names on this rename and
+  // are untouched.
+  static func reqRenamed(
+    _ path: String, _ f: [String: JSON], _ canonical: String, _ legacy: String
+  ) throws -> JSON {
+    let canonicalValue = f[canonical]
+    let legacyValue = f[legacy]
+    if canonicalValue != nil, legacyValue != nil {
+      throw wrongType(
+        path,
+        "exactly one of \"\(canonical)\" (canonical since 0.28.0) or \"\(legacy)\" (its decode "
+          + "alias) — a step carrying both is ambiguous and is refused rather than resolved to "
+          + "either, since the two may name different columns and no reading of the document "
+          + "says which the author meant")
+    }
+    guard let v = canonicalValue ?? legacyValue else { throw missing(path, canonical) }
+    return v
+  }
+
   // ── DataSource ────────────────────────────────────────────────────────────
 
   /// A `Transform`'s embedded source slot.
@@ -434,11 +479,15 @@ extension Decode {
 
   static func sortKey(_ path: String, _ j: JSON) throws -> SortKey {
     let f = try object(path, j)
-    // Lenient-ingest (Core Phases 92/93) — `column` aliases `col`; direction is
-    // one of `dir` (canonical asc|desc), boolean `descending`, or `direction`;
-    // a directionless entry is the SQL default (asc). Only "desc" sorts
-    // descending.
-    let col = try string("\(path).col", try reqAliased(path, f, "col", ["column"]))
+    // The key's column member is `column` (canonical since substrate 0.28.0),
+    // with the pre-rename `col` as its decode alias and BOTH refused — see
+    // `reqRenamed`. This one reader serves both positions the rename touches:
+    // the `sort` step's `by` entries and the `window` step's `orderBy` entries.
+    //
+    // Direction is one of `dir` (canonical asc|desc), boolean `descending`, or
+    // `direction` — those stay ordinary §3.6 lenient aliases; a directionless
+    // entry is the SQL default (asc). Only "desc" sorts descending.
+    let col = try string("\(path).column", try reqRenamed(path, f, "column", "col"))
     let dir: SortDir
     if let d = f["dir"] ?? f["direction"] {
       dir = try string("\(path).dir", d) == "desc" ? .desc : .asc
@@ -510,9 +559,11 @@ extension Decode {
       }
       return .filter(pred: .binary(op: op, left: .col(name: col), right: right))
     case "project":
-      let items = try array("\(path).cols", try req(path, f, "cols"))
+      // `columns` is canonical since substrate 0.28.0, with the pre-rename
+      // `cols` as its decode alias and BOTH refused — see `reqRenamed`.
+      let items = try array("\(path).columns", try reqRenamed(path, f, "columns", "cols"))
       return .project(
-        cols: try items.enumerated().map { try colPair("\(path).cols[\($0.0)]", $0.1) })
+        cols: try items.enumerated().map { try colPair("\(path).columns[\($0.0)]", $0.1) })
     case "derive":
       let deriveName = try reqString(path, f, "name")
       // §21.8 (Phase 1662) — the other bounded pipeline position, and the one

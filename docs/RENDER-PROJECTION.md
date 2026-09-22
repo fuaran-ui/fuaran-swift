@@ -179,7 +179,7 @@ carrying the state is a build error.
 ### Lenient where the specification says to be, strict where it matters
 
 This is a *consumer-grade* decoder — being stricter than the language is an
-availability defect, not a safe default. Four enumerated leniencies:
+availability defect, not a safe default. Five enumerated leniencies:
 
 - **A `Static` envelope wrapped around a plain scalar unwraps** before every
   scalar read, in one place rather than site by site. An object that is not a
@@ -190,6 +190,8 @@ availability defect, not a safe default. Four enumerated leniencies:
   list.
 - **Field-name aliases**, with the canonical name always winning when both are
   present, and the nested path always using the canonical name.
+- **Pre-rename pipeline spellings**, which are aliases with a *different*
+  both-present rule — see below.
 - **Five legacy node-kind upgrades** — `Dashboard`, `Stack`, `GridLayout`, `Card`
   fold into `Box`.
 
@@ -199,6 +201,33 @@ payload slot is refused: the wire spells absence by *omitting* the key, so a
 claims to carry a value and does not. And a typed binding slot still checks its
 type — the shorthand rules are about *shape*, so `"label": "Home"` is sanctioned
 while `"hidden": "yes"` is refused.
+
+#### The renamed pipeline members, and why they refuse what the others resolve
+
+Substrate 0.28.0 renamed two transform-pipeline members: a `project` step's
+`cols` became `columns`, and a sort key's — and so a `window` step's
+frame-ordering entry's — `col` became `column`. Both pre-rename spellings decode
+here as aliases, so a document written against either vocabulary projects and
+sorts identically.
+
+What differs from the field-name aliases above is the **both-present** rule: a
+step or key carrying the canonical name *and* its legacy alias is **refused**
+(`WRONG_TYPE`), where every other alias on this surface resolves to the
+canonical one. The two rules are about different things. An ordinary alias is a
+foreign vocabulary's spelling for a slot that has only ever had one canonical
+name, so the two spellings can only ever have meant the same thing and picking
+the canonical one loses nothing. A rename alias is the *same* author's own
+vocabulary at two versions of it, and a document carrying both is ambiguous in a
+way no reading resolves — the corpus's reject fixtures carry different column
+lists under the two spellings, so resolving to either would silently project or
+sort by a column the author may never have meant. That is precisely the quiet
+failure this arm exists to avoid: an empty projection or an unsorted grid, with
+nothing thrown.
+
+Two things that look like they are part of this rename and are not: the `col`
+**expression tag** (`{"$type":"col","name":…}`) is a discriminator rather than a
+member name, and the `Grid` / `Masonry` layouts' integer `cols` is a different
+slot entirely. Both are untouched.
 
 ### What the projection does not model
 

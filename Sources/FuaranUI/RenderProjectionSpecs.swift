@@ -562,9 +562,9 @@ extension Decode {
     static let checkbox = StaticValue.ast(.bool(false))
     static let choice = StaticValue.stringOpt(nil)
     static let range = StaticValue.floatPair(0.0, 0.0)
-    static let date = StaticValue.ast(.string(""))
-    /// ISO-empty both ends — the pair analogue of `date`'s "" placeholder.
-    static let dateRange = StaticValue.stringPair("", "")
+    static let dateTime = StaticValue.ast(.string(""))
+    /// ISO-empty both ends — the pair analogue of `dateTime`'s "" placeholder.
+    static let dateTimeRange = StaticValue.stringPair("", "")
     /// Phase 1121 — the EMPTY LIST. The token list is ordered and the order is
     /// the reader's, so an auto-bound token field starts with no chips rather
     /// than with a placeholder one.
@@ -576,6 +576,29 @@ extension Decode {
     /// default when handed nothing, and `#000000` is that default's wire
     /// spelling — the one `#rrggbb` form the control can hold.
     static let color = StaticValue.ast(.string("#000000"))
+  }
+
+  /// Phase 1811 — the `variant` of a `DateTime` / `DateTimeRange` field, read
+  /// through the §16 `Time` / `TimeRange` alias rule. Under the canonical tag (or
+  /// the pre-rename alias) `variant` is required as it always was. Under the
+  /// time-alias tag the alias SUPPLIES `Time` when the member is absent, and an
+  /// explicit member beside it must agree — a `$type` of `Time` carrying
+  /// `variant: "Date"` is refused as ambiguous rather than resolved to either.
+  static func temporalVariant(
+    _ path: String, _ f: [String: JSON], _ tag: String, _ timeAlias: String
+  ) throws -> DateTimeVariant {
+    if tag != timeAlias {
+      return try bareEnum("\(path).variant", try req(path, f, "variant"), "DateTimeVariant")
+    }
+    guard let v = f["variant"] else { return .time }
+    let variant: DateTimeVariant = try bareEnum("\(path).variant", v, "DateTimeVariant")
+    guard variant == .time else {
+      throw Decode.wrongType(
+        "\(path).variant",
+        "the variant Time, or no variant at all — a $type of \(timeAlias) already fixes the "
+          + "variant to Time, and a different one beside it is ambiguous")
+    }
+    return .time
   }
 
   static func formFieldKind(
@@ -591,7 +614,8 @@ extension Decode {
       guard let v = f["value"] else { return autoBind.autoBinding(placeholder) }
       return try bindingSlot("\(path).value", v, slot)
     }
-    switch try disc(path, f) {
+    let tag = try disc(path, f)
+    switch tag {
     case "Text":
       return .text(value: try valueOr(.str, ControlValueDefaults.text), onChange: onChange)
     case "Number":
@@ -664,13 +688,21 @@ extension Decode {
         rows: try reqInt(path, f, "rows"),
         value: try valueOr(.str, ControlValueDefaults.text),
         onChange: onChange)
-    case "Date":
-      return .date(
-        value: try valueOr(.str, ControlValueDefaults.date),
-        variant: try bareEnum("\(path).variant", try req(path, f, "variant"), "DateVariant"),
+    // Phase 1811 — `DateTime` is canonical. `Date` is the pre-rename spelling, kept
+    // as a §16 lenient alias by the reference host's D8 ruling; `Time` is the
+    // invented spelling the rename exists to make findable — a
+    // `DateTime{variant:"Time"}` reached for by intent, so the alias SUPPLIES the
+    // variant when absent and REFUSES a disagreeing one beside it.
+    case "DateTime", "Date", "Time":
+      return .dateTime(
+        value: try valueOr(.str, ControlValueDefaults.dateTime),
+        variant: try temporalVariant(path, f, tag, "Time"),
         min: try optString(path, f, "min"), max: try optString(path, f, "max"),
         step: try optFloat(path, f, "step"), onChange: onChange)
-    case "DateRange":
+    // Phase 1811 — `DateTimeRange` is canonical; `DateRange` (pre-rename) and
+    // `TimeRange` (invented, fixes `variant` to `Time`) are its §16 lenient aliases
+    // on exactly the `DateTime` rule above.
+    case "DateTimeRange", "DateRange", "TimeRange":
       // The canonical Static pair rides as the BARE `{from, to}` object (no
       // `$type`) — accept it before the generic binding dispatch, exactly as
       // `Range` does above. The `valueOr` fallback carries both lenient forms
@@ -681,11 +713,11 @@ extension Decode {
       {
         value = .staticValue(try StaticSlot.stringPair.parse("\(path).value", .object(pf)))
       } else {
-        value = try valueOr(.stringPair, ControlValueDefaults.dateRange)
+        value = try valueOr(.stringPair, ControlValueDefaults.dateTimeRange)
       }
-      return .dateRange(
+      return .dateTimeRange(
         value: value,
-        variant: try bareEnum("\(path).variant", try req(path, f, "variant"), "DateVariant"),
+        variant: try temporalVariant(path, f, tag, "TimeRange"),
         min: try optString(path, f, "min"), max: try optString(path, f, "max"),
         step: try optFloat(path, f, "step"), onChange: onChange)
     // Phase 1121 — every member OPTIONAL, and `allowFreeText` omits at TRUE.
@@ -740,7 +772,7 @@ extension Decode {
       throw unknownCase(
         path, o,
         "Text | Number | Checkbox | Choice | Combobox | Range | RangedNumber | SegmentedChoice "
-          + "| TextArea | Date | DateRange | Tokens | Rating | Color"
+          + "| TextArea | DateTime | DateTimeRange | Tokens | Rating | Color"
       )
     }
   }
@@ -1926,7 +1958,10 @@ extension Decode {
       describedBy: try optString(path, f, "describedBy"),
       role: try optString(path, f, "role"),
       liveRegion: liveRegion,
-      hidden: try optBindingSlot(path, f, "hidden", .bool))
+      hidden: try optBindingSlot(path, f, "hidden", .bool),
+      // Phase 1812 — the spoken rendering, an ordinary `TextSource` slot like
+      // `tooltip`; inert to the visual projection.
+      speak: try optTextSource(path, f, "speak"))
   }
 
   /// The single funnel for NODE recursion — every child, every nested slot and the root
@@ -1957,8 +1992,13 @@ extension Decode {
     // fixtures round-tripped with the hint silently on the floor, and the reject
     // vector decoded — the quiet half of the same defect.
     let tooltipV: TextSource? = try optTextSource(path, f, "tooltip")
+    // Phase 1812 — the author-declared fallback: a full node, walked by the same
+    // decoder as any nested node, preserved and never rendered by a reader that
+    // decodes the kind.
+    let fallbackV: NodeRef? =
+      try f["fallback"].map { NodeRef(try node("\(path).fallback", $0, walk)) }
     return Node(
       id: id, kind: kind, state: state, style: style, accessibility: accessibilityV,
-      tooltip: tooltipV)
+      tooltip: tooltipV, fallback: fallbackV)
   }
 }

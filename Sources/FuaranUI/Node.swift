@@ -58,6 +58,24 @@ public struct Accessibility: Equatable, Sendable {
   public var role: String?
   public var liveRegion: LiveRegionKind?
   public var hidden: Binding?
+  /// Phase 1812 — the node's SPOKEN rendering for a voice surface: an ordinary
+  /// `TextSource` (bare-string canonical for a literal, as `tooltip`). Inert to
+  /// every visual renderer: it MUST reach no attribute and no visible text.
+  public var speak: TextSource?
+
+  public init(
+    label: Binding? = nil, labelledBy: String? = nil, describedBy: String? = nil,
+    role: String? = nil, liveRegion: LiveRegionKind? = nil, hidden: Binding? = nil,
+    speak: TextSource? = nil
+  ) {
+    self.label = label
+    self.labelledBy = labelledBy
+    self.describedBy = describedBy
+    self.role = role
+    self.liveRegion = liveRegion
+    self.hidden = hidden
+    self.speak = speak
+  }
 }
 
 /// The behavioural category a primitive belongs to — recovered on decode, never
@@ -215,11 +233,17 @@ public struct Node: Equatable, Sendable {
   /// competing names and no description. See `tooltipProjection` in the
   /// renderer for how that lands on this platform.
   public var tooltip: TextSource?
+  /// Phase 1812 — the author-declared degraded rendering: a full node a BEHIND
+  /// reader (one that meets this node's kind as a transport-only `Unknown`)
+  /// renders in place of its placeholder. A current reader decodes and preserves
+  /// it and never renders it. Boxed, as `StateBehaviour`'s slots are, because a
+  /// value type cannot hold itself.
+  public var fallback: NodeRef?
 
   public init(
     id: String, kind: NodeKind, state: StateBehaviour = .empty,
     style: SemanticStyle = .default, accessibility: Accessibility? = nil,
-    tooltip: TextSource? = nil
+    tooltip: TextSource? = nil, fallback: NodeRef? = nil
   ) {
     self.id = id
     self.kind = kind
@@ -227,5 +251,6 @@ public struct Node: Equatable, Sendable {
     self.style = style
     self.accessibility = accessibility
     self.tooltip = tooltip
+    self.fallback = fallback
   }
 }

@@ -93,7 +93,10 @@ public enum Format: Equatable, Sendable {
   case number(decimals: Int?)
   case currency(isoCode: String)
   case percent(decimals: Int?)
-  case date(dateStyle: DateStyle)
+  /// Phase 1810 — `dateStyle` / `timeStyle` are BOTH optional: `timeStyle` alone
+  /// is a time of day, both together a date-time. Phase 1811 — `dateTime` (was
+  /// `date`): an honest name once it renders a time.
+  case dateTime(dateStyle: DateStyle?, timeStyle: TimeStyle?)
   case relativeTime(unit: RelativeTimeUnit)
   /// Phase 1533 — the elapsed-time rendition. Distinct from `relativeTime`:
   /// this one is a function of the HOST instant as well as of its source, so a
@@ -211,7 +214,8 @@ public enum CellFormat: Equatable, Sendable {
   case currency(code: String)
   case percent(decimals: Int?)
   case significantDigits(digits: Int)
-  case date(format: String)
+  /// Phase 1811 — `dateTime` (was `date`): the pattern renders a date, a time or both.
+  case dateTime(format: String)
   case duration(unit: DurationUnit, style: DurationStyle)
   /// A relative-time CELL format ("3 minutes ago"). Distinct from the `Format` DU's own
   /// `relativeTime`: the wire carries two format DUs and a case in one is not a case in

@@ -589,16 +589,19 @@ public enum FormFieldKind: Equatable, Sendable {
   case segmentedChoice(
     options: Binding, orientation: Orientation, value: Binding, onChange: Closure?)
   case textArea(rows: Int, value: Binding, onChange: Closure?)
-  case date(
-    value: Binding, variant: DateVariant, min: String?, max: String?, step: Double?,
+  /// Phase 1811 — `dateTime` (was `date`): the field already took a date, a time
+  /// of day or both via `variant`; the name now says so.
+  case dateTime(
+    value: Binding, variant: DateTimeVariant, min: String?, max: String?, step: Double?,
     onChange: Closure?)
-  /// 0.7.0 — the single-control date range: `range`'s pair mechanics with
-  /// `date`'s value conventions (an identical associated-value list to `date`,
-  /// reusing the existing `DateVariant` — no new enum). In a filter context the
-  /// pair binds ONE filter param, not two, which is the reason the case exists
-  /// rather than two coordinated `date` fields.
-  case dateRange(
-    value: Binding, variant: DateVariant, min: String?, max: String?, step: Double?,
+  /// 0.7.0 — the single-control date range (`dateTimeRange` since Phase 1811):
+  /// `range`'s pair mechanics with `dateTime`'s value conventions (an identical
+  /// associated-value list to `dateTime`, reusing the existing `DateTimeVariant` —
+  /// no new enum). In a filter context the pair binds ONE filter param, not two,
+  /// which is the reason the case exists rather than two coordinated `dateTime`
+  /// fields.
+  case dateTimeRange(
+    value: Binding, variant: DateTimeVariant, min: String?, max: String?, step: Double?,
     onChange: Closure?)
   /// Phase 1121 (§3.6.19) — SEVERAL values accumulated as removable chips, over
   /// a suggestion set that may be open, searchable, asynchronous, or absent.

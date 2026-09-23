@@ -1142,7 +1142,7 @@
         // Write-back (Phase 541): a state-backed field edit writes through the
         // session's $state channel via the ambient action sink.
         StatefulTextField(label: label, initial: ctx.resolve(value), stateKey: stateKeyOf(value))
-      case .choice(_, let value, _), .date(let value, _, _, _, _, _):
+      case .choice(_, let value, _), .dateTime(let value, _, _, _, _, _):
         labelled(label) { TextField("", text: .constant(ctx.resolve(value))).disabled(true) }
       // §3.6.9 (Phase 1113) — the searchable form of `choice`, rendered on
       // `choice`'s own control because the two ARE the same value contract; a
@@ -1214,7 +1214,7 @@
             }
           }
         }
-      case .dateRange(let value, _, _, _, _, _):
+      case .dateTimeRange(let value, _, _, _, _, _):
         // 0.7.0 — the single-control date range. The structural intent that
         // transfers from the reference renderer is ONE pair with ONE write-back,
         // not two coordinated `date` fields — so this renders one labelled row

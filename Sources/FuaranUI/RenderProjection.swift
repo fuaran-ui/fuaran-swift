@@ -593,7 +593,7 @@ enum StaticSlot {
         if from > to {
           throw Decode.err(
             .wrongType, path,
-            "date-range start '\(from)' is after end '\(to)' — a DateRange pair is ordered "
+            "date-range start '\(from)' is after end '\(to)' — a DateTimeRange pair is ordered "
               + "(from <= to); ISO-8601 strings of one variant compare lexicographically, "
               + "so swap the two values")
         }
@@ -656,9 +656,13 @@ extension Decode {
     case "Number": return .number(decimals: try optInt(path, f, "decimals"))
     case "Currency": return .currency(isoCode: try reqString(path, f, "isoCode"))
     case "Percent": return .percent(decimals: try optInt(path, f, "decimals"))
-    case "Date":
-      return .date(
-        dateStyle: try bareEnum("\(path).dateStyle", try req(path, f, "dateStyle"), "DateStyle"))
+    // Phase 1811 — `DateTime` is canonical; `Date` (the pre-rename spelling) is its
+    // §16 lenient alias, decoded to the same value. Phase 1810 — both style slots
+    // are optional; neither present is the validator's subject, not a shape error.
+    case "DateTime", "Date":
+      return .dateTime(
+        dateStyle: try f["dateStyle"].map { try bareEnum("\(path).dateStyle", $0, "DateStyle") },
+        timeStyle: try f["timeStyle"].map { try bareEnum("\(path).timeStyle", $0, "TimeStyle") })
     case "RelativeTime":
       return .relativeTime(
         unit: try bareEnum("\(path).unit", try req(path, f, "unit"), "RelativeTimeUnit"))
@@ -698,7 +702,8 @@ extension Decode {
     case "Currency": return .currency(code: try reqString(path, f, "code"))
     case "Percent": return .percent(decimals: try optInt(path, f, "decimals"))
     case "SignificantDigits": return .significantDigits(digits: try reqInt(path, f, "digits"))
-    case "Date": return .date(format: try reqString(path, f, "format"))
+    // Phase 1811 — `DateTime` is canonical; `Date` is its §16 lenient alias.
+    case "DateTime", "Date": return .dateTime(format: try reqString(path, f, "format"))
     case "Duration":
       return .duration(
         unit: try bareEnum("\(path).unit", try req(path, f, "unit"), "DurationUnit"),

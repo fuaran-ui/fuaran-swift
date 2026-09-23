@@ -323,7 +323,7 @@ func formatDuration(_ raw: Double, _ unit: DurationUnit, _ style: DurationStyle)
 func formatCellValue(_ text: String, _ format: CellFormat) -> String {
   guard let n = Double(text) else { return text }
   switch format {
-  case .none, .date, .custom: return text
+  case .none, .dateTime, .custom: return text
   case .number(let decimals): return String(format: "%.\(decimals ?? 0)f", locale: nil, n)
   case .currency(let code): return "\(code) \(String(format: "%.2f", locale: nil, n))"
   case .percent(let decimals): return String(format: "%.\(decimals ?? 0)f%%", locale: nil, n * 100)

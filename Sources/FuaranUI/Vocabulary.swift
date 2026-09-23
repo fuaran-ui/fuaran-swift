@@ -188,7 +188,9 @@ public enum MathDisplay: String, CaseIterable, Equatable, Sendable {
   case block = "Block"
 }
 
-public enum DateVariant: String, CaseIterable, Equatable, Sendable {
+/// Phase 1811 — `DateTimeVariant` (was `DateVariant`): the temporal breadth of a
+/// `dateTime` / `dateTimeRange` field. The three cases did not move.
+public enum DateTimeVariant: String, CaseIterable, Equatable, Sendable {
   case date = "Date"
   case time = "Time"
   case dateTime = "DateTime"
@@ -243,6 +245,16 @@ public enum LiveRegionKind: String, CaseIterable, Equatable, Sendable {
 }
 
 public enum DateStyle: String, CaseIterable, Equatable, Sendable {
+  case short = "Short"
+  case medium = "Medium"
+  case long = "Long"
+  case full = "Full"
+}
+
+/// Phase 1810 — the time-of-day half of `Format.dateTime`'s `dateStyle` /
+/// `timeStyle` pair. The same four cases as `DateStyle`, deliberately a SEPARATE
+/// enum: the two name breadths of different things.
+public enum TimeStyle: String, CaseIterable, Equatable, Sendable {
   case short = "Short"
   case medium = "Medium"
   case long = "Long"

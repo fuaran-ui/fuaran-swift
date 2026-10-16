@@ -35,20 +35,20 @@ import XCTest
       ]
       let columns = kinds.enumerated().map { i, kind in
         ColumnErased(
-          format: .none, kind: kind, label: "c\(i)", width: .auto, value: nil, field: "status")
+          field: "status", format: .none, kind: kind, label: "c\(i)", value: nil, width: .auto)
       }
       return Node(
         id: "grid",
         kind: .dataGrid(
           GridSpec(
-            columns: columns, editable: false, source: .query(name: "rows", dependsOn: []),
-            onRowClick: nil, rowKey: nil, rowKeyField: "status", staticRows: nil,
-            sortStateKey: nil, pageStateKey: nil, editStateKey: nil, pageSize: nil,
-            defaultSort: nil,
-            // Phase 1499's widening. All three at their omitted-at defaults: this fixture
+            columns: columns, editable: false, rowKey: nil,
+            rowKeyField: "status", sortStateKey: nil, pageSize: nil, pageStateKey: nil,
+            defaultSort: nil, editStateKey: nil,  // Phase 1499's widening. All three at their omitted-at defaults: this fixture
             // exists to walk every CELL arm, and pagination / export say nothing about
             // which cell arm a column takes.
-            keepRowsTogether: false, repeatHeader: false, exportable: false)))
+            keepRowsTogether: false, repeatHeader: false,
+            exportable: false,
+            source: .query(name: "rows", dependsOn: []), staticRows: nil, onRowClick: nil)))
     }
 
     private func rows(_ values: [String]) -> ResolvedRows {

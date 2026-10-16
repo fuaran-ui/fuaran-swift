@@ -30,9 +30,9 @@ final class ImagePresentationTests: XCTestCase {
       fit: fit,
       aspectRatio: aspectRatio,
       loading: loading,
-      caption: caption,
       srcSet: srcSet.map { SrcSetEntry(src: binding($0.0), width: $0.1) },
-      expandable: expandable)
+      expandable: expandable,
+      caption: caption)
   }
 
   private func plan(_ spec: ImageSpec, src: String = "/harbour.jpg") -> ImagePresentationPlan {

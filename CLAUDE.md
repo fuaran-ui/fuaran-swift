@@ -15,6 +15,21 @@ This repo sits alongside the other Fuaran reference-implementation tiers. Cross-
   "native Swift surface … over the Rust reference core", never "conformant host". The Swift side is a
   render projection: it decodes the canonical tree JSON the core hands back and models it as native
   sealed types for rendering; it does not canonically encode, so there is **no §11 byte-parity leg**.
+- **The sealed tree model is GENERATED from the corpus's published `idl.json` (Phase 2299 ruling,
+  2026-10-16).** This repository's own generator (`Sources/FuaranUIIdlGen`, Foundation only, in no
+  product) reads the IDL — `FUARAN_WIRE_FIXTURES` first, then the corpus locator — and writes
+  `Sources/FuaranUI/Model.generated.swift`: the bare-string enums, the tagged unions, the records,
+  one spec per kind, `NodeKind`, `NodeKindTag` and `NodeCategory`, recording the IDL's SHA-256. It
+  applies uniform rules (in `Codegen.swift`'s header); every place this surface models a position
+  differently is ONE entry in `Dialect.swift` with its reason, and the generator REFUSES an entry that
+  names something the IDL no longer has or that the rules would now produce themselves. A host
+  representation quirk never goes into the IDL. Reading a language-neutral data artefact with this
+  repository's own generator is not a transpile: no code is shared with any other tier. Decode
+  policy, leniency, refusal wording, limits, the JSON reader, rendering and the session stay
+  hand-written. `GeneratedModelTests` (in `CorpusTests.swift`) is the drift check — red when the
+  corpus IDL moved and the model did not — and `FUARAN_IDL_REGENERATE=1 swift test --filter
+  GeneratedModelTests` (or `swift run fuaran-idl-gen`) is the regeneration. The model and the
+  corpus pin move together: the generated file is the pinned corpus's IDL regenerated.
 - **Wire-format fidelity is the decode contract.** The decoder parses every node fixture in the
   shared `../wire-format-fixtures/` corpus into the sealed model with a compile-time-exhaustive
   `switch`; a new wire kind that misses an arm is a **build error**, not a silent fallback.
@@ -32,12 +47,16 @@ cannot slip in unhandled.
 ```
 fuaran-swift/
 ├── Sources/FuaranUI/
-│   ├── Vocabulary.swift          # bare-string wire enums (String-raw, rawValue == wire spelling)
+│   ├── Model.generated.swift     # GENERATED from the corpus idl.json — the sealed tree model
+│   ├── Vocabulary.swift          # compute-layer enums + render-side projections of generated enums
 │   ├── JSON.swift                # portable JSON value + hand parser + FuaranDecodeError
-│   ├── Bindings.swift            # TextSource / Binding / Action / dataframe compute layer
-│   ├── Specs.swift               # per-kind spec records + Drawing vector-graphics vocabulary
-│   ├── Node.swift                # Node envelope + closed NodeKind (+ exhaustive typeName/category)
+│   ├── Bindings.swift            # Closure / StaticValue / NamedBinding / dataframe compute layer
+│   ├── Specs.swift               # the hand-written model types (dialect `handWritten`) + conveniences
+│   ├── Node.swift                # Node envelope (hand-written)
 │   └── RenderProjection*.swift   # the render-projection decoder (canonical tree JSON → sealed model)
+├── Sources/FuaranUIIdlGen/       # the generator: Idl.swift (reader), Codegen.swift (the rules),
+│                                 # Dialect.swift (every divergence, with its reason), ModelDocs.swift
+├── Sources/fuaran-idl-gen/       # `swift run fuaran-idl-gen` — the generator as a command
 ├── Sources/FuaranUIRenderer/
 │   ├── MediaPlayback.swift       # the media playback projection (the six §3.6.6 obligations)
 │   ├── ImagePresentation.swift   # the image presentation projection (§3.6.2–§3.6.5)
@@ -82,8 +101,10 @@ The canonical wire format is owned by the F# tier (`../fuaran-dotnet/docs/WIRE_F
 workspace-level `../wire-format-fixtures/` corpus as the executable conformance suite. `fuaran-swift`
 is a **decode-only render projection** of that format: `RenderProjection.decodeNode` parses a
 canonical `Node` document into the sealed Swift model. The **forward-coupling rule** (`WIRE_FORMAT.md`
-§11) means a new `NodeKind` / `Spec` / `Binding` / `Action` case moves every host — the Swift model +
-decoder + the corpus render-coverage harness are updated in the same change here.
+§11) means a new `NodeKind` / `Spec` / `Binding` / `Action` case moves every host — here the model
+is REGENERATED (never hand-edited), and the decoder + the corpus render-coverage harness are updated
+in the same change; the decoder's exhaustive dispatch over `NodeKindTag` is where a new kind first
+fails to compile.
 
 ### Corpus render-coverage
 

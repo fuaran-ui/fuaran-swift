@@ -51,13 +51,17 @@ extension Decode {
     } else {
       emphasis = false
     }
+    let labelV = try reqTextSource(path, f, "label")
+    // 0.2.0 rename law — scalar displayed value ⇒ `value` (`data` alias kept).
+    let valueV = try reqBindingSlotAliased(path, f, "value", ["data"], .float)
+    let formatV = try optCellFormatDefault(path, f, "format")
+    let helpV = try optTextSource(path, f, "help")
     return LabelValueRowSpec(
-      label: try reqTextSource(path, f, "label"),
-      // 0.2.0 rename law — scalar displayed value ⇒ `value` (`data` alias kept).
-      value: try reqBindingSlotAliased(path, f, "value", ["data"], .float),
-      format: try optCellFormatDefault(path, f, "format"),
       emphasis: emphasis,
-      help: try optTextSource(path, f, "help"))
+      format: formatV,
+      label: labelV,
+      value: valueV,
+      help: helpV)
   }
 
   static func factSpec(_ path: String, _ j: JSON) throws -> FactSpec {
@@ -68,13 +72,18 @@ extension Decode {
     } else {
       emphasis = false
     }
+    let labelV = try reqTextSource(path, f, "label")
+    let valueV = try reqTextSource(path, f, "value")
+    let toneV = try optToneDefault(path, f, "tone")
+    let helpV = try optTextSource(path, f, "help")
+    let iconV = try optString(path, f, "icon")
     return FactSpec(
-      label: try reqTextSource(path, f, "label"),
-      value: try reqTextSource(path, f, "value"),
       emphasis: emphasis,
-      tone: try optToneDefault(path, f, "tone"),
-      help: try optTextSource(path, f, "help"),
-      icon: try optString(path, f, "icon"))
+      help: helpV,
+      icon: iconV,
+      label: labelV,
+      tone: toneV,
+      value: valueV)
   }
 
   static func markdownSpec(_ path: String, _ j: JSON) throws -> MarkdownSpec {
@@ -134,29 +143,41 @@ extension Decode {
       srcSet = try array("\(path).srcSet", v).enumerated()
         .map { try srcSetEntry("\(path).srcSet[\($0.0)]", $0.1) }
     }
-    return ImageSpec(
-      alt: try reqTextSource(path, f, "alt"),
-      src: try reqBindingSlot(path, f, "src", .str),
-      variant: try bareEnum("\(path).variant", try req(path, f, "variant"), "ImageVariant"),
-      // §3.6.2 — bare enums, so an unknown token reports at the FIELD's own
-      // path with no `.$type` suffix (Phase 1073; `reject-unknown-image-aspect`
-      // pins it). Absent decodes to the identity default, which is what makes a
-      // pre-1077 document decode to today's behaviour.
-      fit: try f["fit"].map { try bareEnum("\(path).fit", $0, "ImageFit") } ?? .natural,
-      aspectRatio: try f["aspectRatio"].map {
+    let altV = try reqTextSource(path, f, "alt")
+    let srcV = try reqBindingSlot(path, f, "src", .str)
+    let variantV: ImageVariant = try bareEnum(
+      "\(path).variant", try req(path, f, "variant"), "ImageVariant")
+    // §3.6.2 — bare enums, so an unknown token reports at the FIELD's own
+    // path with no `.$type` suffix (Phase 1073; `reject-unknown-image-aspect`
+    // pins it). Absent decodes to the identity default, which is what makes a
+    // pre-1077 document decode to today's behaviour.
+    let fitV: ImageFit =
+      try f["fit"].map { try bareEnum("\(path).fit", $0, "ImageFit") } ?? .natural
+    let aspectRatioV: ImageAspect =
+      try f["aspectRatio"].map {
         try bareEnum("\(path).aspectRatio", $0, "ImageAspect")
-      } ?? .natural,
-      loading: try f["loading"].map { try bareEnum("\(path).loading", $0, "ImageLoading") }
-        ?? .eager,
-      // §3.6.3 — a TextSource, so the enveloped `{"$type":"Literal","text":…}`
-      // input canonicalises exactly as it does on `alt`.
-      caption: try optTextSource(path, f, "caption"),
+      } ?? .natural
+    let loadingV: ImageLoading =
+      try f["loading"].map { try bareEnum("\(path).loading", $0, "ImageLoading") }
+      ?? .eager
+    // §3.6.3 — a TextSource, so the enveloped `{"$type":"Literal","text":…}`
+    // input canonicalises exactly as it does on `alt`.
+    let captionV = try optTextSource(path, f, "caption")
+    // §3.6.5 — a plain bool. A stringified boolean is REFUSED rather than
+    // coerced: a truthiness rule would have to rule on `"false"` and `""` as
+    // well, and two hosts ruling differently would disagree about whether a
+    // document declares an affordance at all.
+    let expandableV = try optBool(path, f, "expandable") ?? false
+    return ImageSpec(
+      alt: altV,
+      src: srcV,
+      variant: variantV,
+      fit: fitV,
+      aspectRatio: aspectRatioV,
+      loading: loadingV,
       srcSet: srcSet,
-      // §3.6.5 — a plain bool. A stringified boolean is REFUSED rather than
-      // coerced: a truthiness rule would have to rule on `"false"` and `""` as
-      // well, and two hosts ruling differently would disagree about whether a
-      // document declares an affordance at all.
-      expandable: try optBool(path, f, "expandable") ?? false)
+      expandable: expandableV,
+      caption: captionV)
   }
 
   /// §3.6.6 — the `MediaKind` variant, `$type`-discriminated at `kind.kind`.
@@ -327,25 +348,33 @@ extension Decode {
 
   static func toastSpec(_ path: String, _ j: JSON) throws -> ToastSpec {
     let f = try object(path, j)
+    let messageV = try reqTextSource(path, f, "message")
+    let toneV = try optToneDefault(path, f, "tone")
+    let openV = try reqBindingSlot(path, f, "open", .bool)
+    // 0.2.0 — omitted-when-TRUE (a toast is dismissable unless said
+    // otherwise; the one inverted default in §3.6's table).
+    let dismissableV = try optBool(path, f, "dismissable") ?? true
     return ToastSpec(
-      message: try reqTextSource(path, f, "message"),
-      tone: try optToneDefault(path, f, "tone"),
-      open: try reqBindingSlot(path, f, "open", .bool),
-      // 0.2.0 — omitted-when-TRUE (a toast is dismissable unless said
-      // otherwise; the one inverted default in §3.6's table).
-      dismissable: try optBool(path, f, "dismissable") ?? true)
+      dismissable: dismissableV,
+      message: messageV,
+      open: openV,
+      tone: toneV)
   }
 
   static func codeBlockSpec(_ path: String, _ j: JSON) throws -> CodeBlockSpec {
     let f = try object(path, j)
     let lines = try array("\(path).highlightLines", try req(path, f, "highlightLines")).enumerated()
       .map { try int("\(path).highlightLines[\($0.0)]", $0.1) }
+    let codeV = try reqString(path, f, "code")
+    let languageV = try reqString(path, f, "language")
+    let lineNumbersV = try reqBool(path, f, "lineNumbers")
+    let copyableV = try reqBool(path, f, "copyable")
     return CodeBlockSpec(
-      code: try reqString(path, f, "code"),
-      language: try reqString(path, f, "language"),
-      lineNumbers: try reqBool(path, f, "lineNumbers"),
+      code: codeV,
+      copyable: copyableV,
       highlightLines: lines,
-      copyable: try reqBool(path, f, "copyable"))
+      language: languageV,
+      lineNumbers: lineNumbersV)
   }
 
   static func mathSpec(_ path: String, _ j: JSON) throws -> MathSpec {
@@ -605,8 +634,12 @@ extension Decode {
     _ autoBind: ControlAutoBind, _ path: String, _ j: JSON
   ) throws -> FormFieldKind {
     let f = try object(path, j)
+    // Phase 2177 — ONE change-handler name on every case, `Checkbox` and `Toggle`
+    // included. The retired `onToggle` spelling is a member those cases do not
+    // declare, so it is tolerated and ignored like any other: the field decodes
+    // handler-free (the write-back default), never with a handler. The public
+    // payload label stays `onToggle` (the `Dialect.swift` entry says why).
     let onChange = optClosure(f, "onChange")
-    let onToggle = optClosure(f, "onToggle")
     // Value slot: present ⇒ typed decode; absent ⇒ the context's auto-binding —
     // Filter(name) on a chip, State(field id, typed placeholder) on a form
     // field (Phase 596).
@@ -622,11 +655,11 @@ extension Decode {
       return .number(value: try valueOr(.float, ControlValueDefaults.number), onChange: onChange)
     case "Checkbox":
       return .checkbox(
-        value: try valueOr(.bool, ControlValueDefaults.checkbox), onToggle: onToggle)
+        value: try valueOr(.bool, ControlValueDefaults.checkbox), onToggle: onChange)
     // The switch affordance beside a Checkbox: the same boolean slot, a different control.
     case "Toggle":
       return .toggle(
-        value: try valueOr(.bool, ControlValueDefaults.checkbox), onToggle: onToggle)
+        value: try valueOr(.bool, ControlValueDefaults.checkbox), onToggle: onChange)
     case "Choice":
       return .choice(
         options: try reqBindingSlot(path, f, "options", .options),
@@ -792,9 +825,11 @@ extension Decode {
   /// The cross-field operand: an operator plus a `Binding` to compare against.
   static func compareRule(_ path: String, _ j: JSON) throws -> CompareRule {
     let f = try object(path, j)
+    let opV: CompareOp = try bareEnum("\(path).op", try req(path, f, "op"), "CompareOp")
+    let againstV = try reqBinding(path, f, "against")
     return CompareRule(
-      op: try bareEnum("\(path).op", try req(path, f, "op"), "CompareOp"),
-      against: try reqBinding(path, f, "against"))
+      against: againstV,
+      op: opV)
   }
 
   /// A field's declared constraint. Every slot is optional structurally, and
@@ -835,8 +870,8 @@ extension Decode {
           + "at all, so the field could never be submitted")
     }
     return FieldRule(
-      format: format, pattern: pattern, minLength: minLength, maxLength: maxLength,
-      compare: compare, message: message)
+      compare: compare, format: format, maxLength: maxLength, message: message,
+      minLength: minLength, pattern: pattern)
   }
 
   static func formField(_ path: String, _ j: JSON) throws -> FormField {
@@ -898,17 +933,23 @@ extension Decode {
     let f = try object(path, j)
     var values: Binding? = nil
     if let v = f["values"] { values = try bindingSlot("\(path).values", v, .stringList) }
+    let labelV = try reqTextSource(path, f, "label")
+    // Field aliases: options / data → source.
+    let sourceV = try reqBindingSlotAliased(path, f, "source", ["options", "data"], .options)
+    let valueV = try reqBindingSlot(path, f, "value", .stringOpt)
+    let placeholderV = try optTextSource(path, f, "placeholder")
+    let disabledV = try optBindingSlot(path, f, "disabled", .bool)
+    let multipleV = (try optBool(path, f, "multiple")) == true
     return SelectSpec(
-      label: try reqTextSource(path, f, "label"),
-      // Field aliases: options / data → source.
-      source: try reqBindingSlotAliased(path, f, "source", ["options", "data"], .options),
-      value: try reqBindingSlot(path, f, "value", .stringOpt),
+      label: labelV,
       onChange: optClosure(f, "onChange"),
-      placeholder: try optTextSource(path, f, "placeholder"),
-      disabled: try optBindingSlot(path, f, "disabled", .bool),
-      multiple: (try optBool(path, f, "multiple")) == true,
-      values: values,
-      onChangeMulti: optClosure(f, "onChangeMulti"))
+      onChangeMulti: optClosure(f, "onChangeMulti"),
+      source: sourceV,
+      value: valueV,
+      placeholder: placeholderV,
+      disabled: disabledV,
+      multiple: multipleV,
+      values: values)
   }
 
   static func fileUploadSpec(_ path: String, _ j: JSON) throws -> FileUploadSpec {
@@ -934,32 +975,39 @@ extension Decode {
         "a registered destination name — an absent member is already the spelling for an upload "
           + "that streams nowhere")
     }
+    let labelV = try reqTextSource(path, f, "label")
+    let multipleV = try reqBool(path, f, "multiple")
+    let disabledV = try optBindingSlot(path, f, "disabled", .bool)
+    // Phase 1115 — read through the STRICT bool reader: each slot decides
+    // whether a whole ingress route exists, and a truthiness read would open
+    // a drop target on `"no"` and `"false"` alike.
+    let dropTargetV = try optBool(path, f, "dropTarget") ?? false
+    let acceptPasteV = try optBool(path, f, "acceptPaste") ?? false
+    // Phase 1548 — the two declared ceilings. `maxFiles` is NOT cross-checked
+    // against `multiple`: beside `"multiple":false` the member is INERT by
+    // specification, and a host refusing it would reject documents every
+    // other host accepts, which is the divergence a declared ceiling exists
+    // to remove.
+    let maxBytesV = try optPositive(
+      path, f, "maxBytes",
+      "a positive per-file byte ceiling — a ceiling of zero is not a small ceiling but an "
+        + "upload that can accept no file at all, and an absent member is already the spelling "
+        + "for no ceiling")
+    let maxFilesV = try optPositive(
+      path, f, "maxFiles",
+      "a positive selection-count ceiling — a multiple upload admitting zero files has no "
+        + "reachable selection, and an absent member is already the spelling for no ceiling")
     return FileUploadSpec(
       accept: accept,
-      label: try reqTextSource(path, f, "label"),
-      multiple: try reqBool(path, f, "multiple"),
-      disabled: try optBindingSlot(path, f, "disabled", .bool),
-      // Phase 1115 — read through the STRICT bool reader: each slot decides
-      // whether a whole ingress route exists, and a truthiness read would open
-      // a drop target on `"no"` and `"false"` alike.
-      dropTarget: try optBool(path, f, "dropTarget") ?? false,
-      acceptPaste: try optBool(path, f, "acceptPaste") ?? false,
+      label: labelV,
+      multiple: multipleV,
+      disabled: disabledV,
+      acceptPaste: acceptPasteV,
+      dropTarget: dropTargetV,
       capture: captureV,
       destination: destinationV,
-      // Phase 1548 — the two declared ceilings. `maxFiles` is NOT cross-checked
-      // against `multiple`: beside `"multiple":false` the member is INERT by
-      // specification, and a host refusing it would reject documents every
-      // other host accepts, which is the divergence a declared ceiling exists
-      // to remove.
-      maxBytes: try optPositive(
-        path, f, "maxBytes",
-        "a positive per-file byte ceiling — a ceiling of zero is not a small ceiling but an "
-          + "upload that can accept no file at all, and an absent member is already the spelling "
-          + "for no ceiling"),
-      maxFiles: try optPositive(
-        path, f, "maxFiles",
-        "a positive selection-count ceiling — a multiple upload admitting zero files has no "
-          + "reachable selection, and an absent member is already the spelling for no ceiling"))
+      maxBytes: maxBytesV,
+      maxFiles: maxFilesV)
   }
 
   /// §3.6.23 — one OPTIONAL, POSITIVE integer ceiling, read at decode.
@@ -1078,13 +1126,18 @@ extension Decode {
     // kind, header/title → label.
     try refuseNearMiss(
       path, f, [("readOnly", "editable: false (readOnly is its inverse)")])
+    let formatV = try optCellFormatDefault(path, f, "format")
+    let kindV = try cellKindErased("\(path).kind", try reqAliased(path, f, "kind", ["type"]))
+    let labelV = try reqStringAliased(path, f, "label", ["header", "title"])
+    let widthV = try optColumnWidthDefault(path, f, "width")
+    let fieldV = try optString(path, f, "field")
     return ColumnErased(
-      format: try optCellFormatDefault(path, f, "format"),
-      kind: try cellKindErased("\(path).kind", try reqAliased(path, f, "kind", ["type"])),
-      label: try reqStringAliased(path, f, "label", ["header", "title"]),
-      width: try optColumnWidthDefault(path, f, "width"),
+      field: fieldV,
+      format: formatV,
+      kind: kindV,
+      label: labelV,
       value: optClosure(f, "value"),
-      field: try optString(path, f, "field"))
+      width: widthV)
   }
 
   /// The ENUMERATED near-miss refusal (WIRE_FORMAT 3.2 "Near-miss names are refused,
@@ -1137,8 +1190,8 @@ extension Decode {
     var tone: ToneVariant = .default
     if let v = f["tone"] { tone = try toneVariant("\(path).tone", v) }
     return IconSpec(
-      icon: try reqString(path, f, "icon"), label: try optString(path, f, "label"),
-      size: size, tone: tone)
+      icon: try reqString(path, f, "icon"), size: size,
+      tone: tone, label: try optString(path, f, "label"))
   }
 
   static func staticRows(_ path: String, _ j: JSON) throws -> StaticRows {
@@ -1153,7 +1206,7 @@ extension Decode {
     var sortV: DefaultSort? = nil
     if let v = f["defaultSort"] { sortV = try defaultSort("\(path).defaultSort", v) }
     return StaticRows(
-      headers: headers, rows: rows, defaultSort: sortV,
+      defaultSort: sortV, headers: headers, rows: rows,
       sortable: try optBool(path, f, "sortable"))
   }
 
@@ -1184,31 +1237,42 @@ extension Decode {
     // `minimum: 1` - a page size of zero paginates nothing, so it is malformed rather
     // than a degenerate configuration the renderer should try to honour.
     if let v = f["pageSize"] { pageSizeV = try intAtLeast("\(path).pageSize", v, 1) }
+    // 0.2.0 — omitted-when-default (false).
+    let editableV = try optBool(path, f, "editable") ?? false
+    // Field aliases: data / rows → source.
+    let sourceV = try reqBindingAliased(path, f, "source", ["data", "rows"])
+    let rowKeyFieldV = try optString(path, f, "rowKeyField")
+    let sortStateKeyV = try optString(path, f, "sortStateKey")
+    let pageStateKeyV = try optString(path, f, "pageStateKey")
+    let editStateKeyV = try optString(path, f, "editStateKey")
+    // Phase 1473 — the paginated-media pair, on Box's terms.
+    let keepRowsTogetherV = try optBool(path, f, "keepRowsTogether") ?? false
+    let repeatHeaderV = try optBool(path, f, "repeatHeader") ?? false
+    // Phase 1123 — a bool, omitted at `false`, never truthiness-coerced: the
+    // slot decides whether a whole affordance exists.
+    let exportableV = try optBool(path, f, "exportable") ?? false
+    // Phase 1125 — separate decoder arms, so a wrong type on either is
+    // reported at its own path.
+    let transferInKeyV = try optString(path, f, "transferInKey")
+    let transferOutKeyV = try optString(path, f, "transferOutKey")
     return GridSpec(
       columns: columns,
-      // 0.2.0 — omitted-when-default (false).
-      editable: try optBool(path, f, "editable") ?? false,
-      // Field aliases: data / rows → source.
-      source: try reqBindingAliased(path, f, "source", ["data", "rows"]),
-      onRowClick: optClosure(f, "onRowClick"),
+      editable: editableV,
       rowKey: optClosure(f, "rowKey"),
-      rowKeyField: try optString(path, f, "rowKeyField"),
-      staticRows: staticRowsV,
-      sortStateKey: try optString(path, f, "sortStateKey"),
-      pageStateKey: try optString(path, f, "pageStateKey"),
-      editStateKey: try optString(path, f, "editStateKey"),
+      rowKeyField: rowKeyFieldV,
+      sortStateKey: sortStateKeyV,
       pageSize: pageSizeV,
+      pageStateKey: pageStateKeyV,
       defaultSort: gridSortV,
-      // Phase 1473 — the paginated-media pair, on Box's terms.
-      keepRowsTogether: try optBool(path, f, "keepRowsTogether") ?? false,
-      repeatHeader: try optBool(path, f, "repeatHeader") ?? false,
-      // Phase 1123 — a bool, omitted at `false`, never truthiness-coerced: the
-      // slot decides whether a whole affordance exists.
-      exportable: try optBool(path, f, "exportable") ?? false,
-      // Phase 1125 — separate decoder arms, so a wrong type on either is
-      // reported at its own path.
-      transferInKey: try optString(path, f, "transferInKey"),
-      transferOutKey: try optString(path, f, "transferOutKey"))
+      editStateKey: editStateKeyV,
+      transferInKey: transferInKeyV,
+      transferOutKey: transferOutKeyV,
+      keepRowsTogether: keepRowsTogetherV,
+      repeatHeader: repeatHeaderV,
+      exportable: exportableV,
+      source: sourceV,
+      staticRows: staticRowsV,
+      onRowClick: optClosure(f, "onRowClick"))
   }
 
   /// `true` when `text` is a canonical ISO-8601 date the temporal axis can
@@ -1365,8 +1429,8 @@ extension Decode {
       xField: try reqString(path, f, "xField"),
       yFields: yFields,
       title: try optTextSource(path, f, "title"),
-      onPointClick: optClosure(f, "onPointClick"),
-      annotations: annotationsV)
+      annotations: annotationsV,
+      onPointClick: optClosure(f, "onPointClick"))
   }
 
   static func mapSpec(_ path: String, _ j: JSON) throws -> MapSpec {
@@ -1437,16 +1501,21 @@ extension Decode {
     guard let role = BoxRole(rawValue: roleStr) else {
       throw unknownEnumCase("\(path).role", roleStr, "Group | Card | Dashboard | Separator")
     }
+    let childrenV = try children(path, f, walk)
+    // Field alias: title → heading (Box is in the scoped set).
+    let headingV = try optTextSourceAliased(path, f, "heading", ["title"])
+    let layoutV = try boxLayout("\(path).layout", try req(path, f, "layout"))
+    // Phase 1473 — the print-break pair, omitted at `false` and never
+    // truthiness-coerced.
+    let breakBeforeV = try optBool(path, f, "breakBefore") ?? false
+    let keepTogetherV = try optBool(path, f, "keepTogether") ?? false
     return BoxSpec(
-      children: try children(path, f, walk),
-      // Field alias: title → heading (Box is in the scoped set).
-      heading: try optTextSourceAliased(path, f, "heading", ["title"]),
-      layout: try boxLayout("\(path).layout", try req(path, f, "layout")),
+      children: childrenV,
+      heading: headingV,
+      layout: layoutV,
       role: role,
-      // Phase 1473 — the print-break pair, omitted at `false` and never
-      // truthiness-coerced.
-      breakBefore: try optBool(path, f, "breakBefore") ?? false,
-      keepTogether: try optBool(path, f, "keepTogether") ?? false)
+      keepTogether: keepTogetherV,
+      breakBefore: breakBeforeV)
   }
 
   static func legacyDashboard(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> BoxSpec {
@@ -1454,7 +1523,7 @@ extension Decode {
     // A LEGACY tag carries none of the print-break declarations by construction.
     return BoxSpec(
       children: try children(path, f, walk), heading: nil, layout: .auto, role: .dashboard,
-      breakBefore: false, keepTogether: false)
+      keepTogether: false, breakBefore: false)
   }
 
   static func legacyStack(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> BoxSpec {
@@ -1464,7 +1533,7 @@ extension Decode {
     return BoxSpec(
       children: try children(path, f, walk), heading: nil,
       layout: .flex(direction: direction, gap: nil, wrap: try reqBool(path, f, "wrap")),
-      role: .group, breakBefore: false, keepTogether: false)
+      role: .group, keepTogether: false, breakBefore: false)
   }
 
   static func legacyGridLayout(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> BoxSpec {
@@ -1474,7 +1543,7 @@ extension Decode {
       layout: .grid(
         cols: try reqInt(path, f, "cols"), gap: nil,
         templateColumns: try optString(path, f, "templateColumns")),
-      role: .group, breakBefore: false, keepTogether: false)
+      role: .group, keepTogether: false, breakBefore: false)
   }
 
   static func legacyCard(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> BoxSpec {
@@ -1482,7 +1551,7 @@ extension Decode {
     return BoxSpec(
       children: try children(path, f, walk), heading: try optTextSource(path, f, "heading"),
       layout: .flex(direction: .vertical, gap: nil, wrap: false), role: .card,
-      breakBefore: false, keepTogether: false)
+      keepTogether: false, breakBefore: false)
   }
 
   static func splitPanelSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> SplitPanelSpec {
@@ -1523,15 +1592,17 @@ extension Decode {
     } else {
       orient = .horizontal
     }
+    let childrenV = try children(path, f, walk)
+    let activeTagV = try optBindingSlot(path, f, "activeTag", .str)
     return TabsSpec(
-      children: try children(path, f, walk),
-      orientation: orient,
       activeIndex: activeIndex,
+      children: childrenV,
+      orientation: orient,
       onSelect: optClosure(f, "onSelect"),
+      onSelectTag: optClosure(f, "onSelectTag"),
       tabHeaders: tabHeaders,
       tabTags: tabTags,
-      activeTag: try optBindingSlot(path, f, "activeTag", .str),
-      onSelectTag: optClosure(f, "onSelectTag"))
+      activeTag: activeTagV)
   }
 
   static func stepperSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> StepperSpec {
@@ -1551,13 +1622,17 @@ extension Decode {
 
   static func disclosureSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> DisclosureSpec {
     let f = try object(path, j)
+    let childrenV = try children(path, f, walk)
+    let defaultOpenV = try reqBool(path, f, "defaultOpen")
+    // Field alias: title → heading.
+    let headingV = try reqTextSourceAliased(path, f, "heading", ["title"])
+    let openV = try reqBindingSlot(path, f, "open", .bool)
     return DisclosureSpec(
-      children: try children(path, f, walk),
-      defaultOpen: try reqBool(path, f, "defaultOpen"),
-      // Field alias: title → heading.
-      heading: try reqTextSourceAliased(path, f, "heading", ["title"]),
-      open: try reqBindingSlot(path, f, "open", .bool),
-      onToggle: optClosure(f, "onToggle"))
+      children: childrenV,
+      defaultOpen: defaultOpenV,
+      heading: headingV,
+      onToggle: optClosure(f, "onToggle"),
+      open: openV)
   }
 
   static func modalSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> ModalSpec {
@@ -1567,8 +1642,8 @@ extension Decode {
     return ModalSpec(
       children: try children(path, f, walk),
       dismissable: try reqBool(path, f, "dismissable"),
-      open: try reqBindingSlot(path, f, "open", .bool),
       onDismiss: onDismiss,
+      open: try reqBindingSlot(path, f, "open", .bool),
       // Field alias: title → heading.
       heading: try optTextSourceAliased(path, f, "heading", ["title"]),
       // §3.6.11 — omitted at `Modal`, the blocking modality every pre-modality
@@ -1668,7 +1743,7 @@ extension Decode {
       throw unknownEnumCase(
         "\(path).determinism", detStr, "Deterministic | Clock | Random | Network")
     }
-    return EffectClass(hostEffect: host, determinism: det)
+    return EffectClass(determinism: det, hostEffect: host)
   }
 
   static func fragmentArg(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> FragmentArg {
@@ -1694,67 +1769,75 @@ extension Decode {
 
   static func nodeKind(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> NodeKind {
     let f = try object(path, j)
-    switch try disc(path, f) {
-    // Layout (+ the four legacy decode-upgrade tags).
-    case "Box": return .box(try boxSpec(path, j, walk))
+    let typeName = try disc(path, f)
+    // The legacy decode-upgrade tags: spellings older documents carry, each
+    // folded into the kind that replaced it. None is a kind of the vocabulary.
+    switch typeName {
     case "Dashboard": return .box(try legacyDashboard(path, j, walk))
     case "Stack": return .box(try legacyStack(path, j, walk))
     case "GridLayout": return .box(try legacyGridLayout(path, j, walk))
     case "Card": return .box(try legacyCard(path, j, walk))
-    case "SplitPanel": return .splitPanel(try splitPanelSpec(path, j, walk))
-    case "Tabs": return .tabs(try tabsSpec(path, j, walk))
-    case "Stepper": return .stepper(try stepperSpec(path, j, walk))
-    case "SummaryList": return .summaryList(try summaryListSpec(path, j, walk))
-    case "Disclosure": return .disclosure(try disclosureSpec(path, j, walk))
-    case "Modal": return .modal(try modalSpec(path, j, walk))
-    case "ScrollArea": return .scrollArea(try scrollAreaSpec(path, j, walk))
-    // Display.
-    case "Heading": return .heading(try headingSpec(path, j))
-    case "Markdown": return .markdown(try markdownSpec(path, j))
-    case "Metric": return .metric(try metricSpec(path, j))
-    case "Badge": return .badge(try badgeSpec(path, j))
-    case "Sparkline": return .sparkline(try sparklineSpec(path, j))
-    case "Callout": return .callout(try calloutSpec(path, j))
-    case "Progress": return .progress(try progressSpec(path, j))
-    case "Skeleton": return .skeleton(try skeletonSpec(path, j))
-    case "Fact": return .fact(try factSpec(path, j))
-    case "LabelValueRow": return .labelValueRow(try labelValueRowSpec(path, j))
-    case "Icon": return .icon(try iconSpec(path, j))
-    case "Link": return .link(try linkSpec(path, j))
-    case "Image": return .image(try imageSpec(path, j))
-    case "Media": return .media(try mediaSpec(path, j))
-    case "Embed": return .embed(try embedSpec(path, j))
-    case "Tree": return .tree(try treeSpec(path, j, walk))
-    case "List": return .list(try listSpec(path, j))
-    case "Toast": return .toast(try toastSpec(path, j))
-    case "CodeBlock": return .codeBlock(try codeBlockSpec(path, j))
-    case "Math": return .math(try mathSpec(path, j))
-    case "Drawing": return .drawing(try drawingSpec(path, j))
-    // Input.
-    case "Form": return .form(try formSpec(path, j))
-    case "Filters":
-      let specs = try array("\(path).items", try req(path, f, "items")).enumerated()
-        .map { try filterSpec("\(path).items[\($0.0)]", $0.1) }
-      return .filters(specs)
-    case "Button": return .button(try buttonSpec(path, j))
-    case "FileUpload": return .fileUpload(try fileUploadSpec(path, j))
-    case "Select": return .select(try selectSpec(path, j))
-    // Visualisation.
-    case "DataGrid": return .dataGrid(try gridSpec(path, j))
-    case "Chart": return .chart(try chartSpec(path, j))
     case "Table":
       // Legacy: a `Table` tag folds into a read-only static-rows grid.
       let rows = try staticRows(path, j)
+      // Every other slot takes its declared default.
       return .dataGrid(
-        GridSpec(
-          columns: [], editable: false, source: .staticValue(.ast(.string(OPAQUE))),
-          onRowClick: nil, rowKey: nil, rowKeyField: nil, staticRows: rows,
-          sortStateKey: nil, pageStateKey: nil, editStateKey: nil, pageSize: nil,
-          defaultSort: nil, keepRowsTogether: false, repeatHeader: false, exportable: false,
-          transferInKey: nil, transferOutKey: nil))
-    case "Map": return .map(try mapSpec(path, j))
+        GridSpec(columns: [], source: .staticValue(.ast(.string(OPAQUE))), staticRows: rows))
+    default: break
+    }
+    guard let tag = NodeKindTag(rawValue: typeName) else {
+      throw err(.wrongNodeKind, "\(path).$type", "unknown NodeKind discriminator '\(typeName)'")
+    }
+    // Exhaustive over the GENERATED kind set (`NodeKindTag`), with no `default`
+    // arm: a kind the IDL gains arrives by regeneration and is a build error
+    // here until its arm is written.
+    switch tag {
+    // Layout.
+    case .box: return .box(try boxSpec(path, j, walk))
+    case .splitPanel: return .splitPanel(try splitPanelSpec(path, j, walk))
+    case .tabs: return .tabs(try tabsSpec(path, j, walk))
+    case .stepper: return .stepper(try stepperSpec(path, j, walk))
+    case .summaryList: return .summaryList(try summaryListSpec(path, j, walk))
+    case .disclosure: return .disclosure(try disclosureSpec(path, j, walk))
+    case .modal: return .modal(try modalSpec(path, j, walk))
+    case .scrollArea: return .scrollArea(try scrollAreaSpec(path, j, walk))
+    // Display.
+    case .heading: return .heading(try headingSpec(path, j))
+    case .markdown: return .markdown(try markdownSpec(path, j))
+    case .metric: return .metric(try metricSpec(path, j))
+    case .badge: return .badge(try badgeSpec(path, j))
+    case .sparkline: return .sparkline(try sparklineSpec(path, j))
+    case .callout: return .callout(try calloutSpec(path, j))
+    case .progress: return .progress(try progressSpec(path, j))
+    case .skeleton: return .skeleton(try skeletonSpec(path, j))
+    case .fact: return .fact(try factSpec(path, j))
+    case .labelValueRow: return .labelValueRow(try labelValueRowSpec(path, j))
+    case .icon: return .icon(try iconSpec(path, j))
+    case .link: return .link(try linkSpec(path, j))
+    case .image: return .image(try imageSpec(path, j))
+    case .media: return .media(try mediaSpec(path, j))
+    case .embed: return .embed(try embedSpec(path, j))
+    case .tree: return .tree(try treeSpec(path, j, walk))
+    case .list: return .list(try listSpec(path, j))
+    case .toast: return .toast(try toastSpec(path, j))
+    case .codeBlock: return .codeBlock(try codeBlockSpec(path, j))
+    case .math: return .math(try mathSpec(path, j))
+    case .drawing: return .drawing(try drawingSpec(path, j))
+    // Input.
+    case .form: return .form(try formSpec(path, j))
+    case .filters:
+      let specs = try array("\(path).items", try req(path, f, "items")).enumerated()
+        .map { try filterSpec("\(path).items[\($0.0)]", $0.1) }
+      return .filters(specs)
+    case .button: return .button(try buttonSpec(path, j))
+    case .fileUpload: return .fileUpload(try fileUploadSpec(path, j))
+    case .select: return .select(try selectSpec(path, j))
+    // Visualisation.
+    case .dataGrid: return .dataGrid(try gridSpec(path, j))
+    case .chart: return .chart(try chartSpec(path, j))
+    case .map: return .map(try mapSpec(path, j))
     // Structural.
-    case "Custom":
+    case .custom:
       var contentHashV: ContentHash? = nil
       if let v = f["contentHash"] { contentHashV = try contentHash("\(path).contentHash", v) }
       var exposed: [String] = []
@@ -1769,12 +1852,12 @@ extension Decode {
           props: try jvalMap("\(path).props", try req(path, f, "props")),
           contentHash: contentHashV,
           exposedNodeIds: exposed))
-    case "ErrorBoundary":
+    case .errorBoundary:
       return .errorBoundary(
         ErrorBoundarySpec(
           child: try node("\(path).child", try req(path, f, "child"), walk),
           fallback: try node("\(path).fallback", try req(path, f, "fallback"), walk)))
-    case "Switch":
+    case .switchKind:
       let cases = try array("\(path).cases", try req(path, f, "cases")).enumerated()
         .map { (i, item) -> SwitchCase in
           let cp = "\(path).cases[\(i)]"
@@ -1831,12 +1914,12 @@ extension Decode {
       }
       return .switchKind(
         SwitchSpec(
-          stateKey: switchKey,
+          autoAdvanceMs: advanceV,
           cases: cases,
           defaultChild: try node("\(path).default", try req(path, f, "default"), walk),
           on: switchOn,
-          autoAdvanceMs: advanceV))
-    case "FragmentDecl":
+          stateKey: switchKey))
+    case .fragmentDecl:
       var holes: [HoleDecl] = []
       if let v = f["holes"] {
         holes = try array("\(path).holes", v).enumerated()
@@ -1844,16 +1927,18 @@ extension Decode {
       }
       let effect: EffectClass =
         try f["effect"].map { try effectClass("\(path).effect", $0) } ?? .pureDeterministic
+      let nameV = try reqString(path, f, "name")
+      let bodyV = try node("\(path).body", try req(path, f, "body"), walk)
       return .fragmentDecl(
         FragmentDeclSpec(
-          name: try reqString(path, f, "name"),
-          body: try node("\(path).body", try req(path, f, "body"), walk),
+          body: bodyV,
+          name: nameV,
           holes: holes, effect: effect))
-    case "FragmentRef":
+    case .fragmentRef:
       let args: [FragmentArgEntry] =
         try f["args"].map { try fragmentArgs("\(path).args", $0, walk) } ?? []
       return .fragmentRef(FragmentRefSpec(name: try reqString(path, f, "name"), args: args))
-    case "Mount":
+    case .mount:
       let channelObj = try object("\(path).channel", try req(path, f, "channel"))
       let dirStr = try reqString("\(path).channel", channelObj, "direction")
       guard let direction = ChannelDirection(rawValue: dirStr) else {
@@ -1863,16 +1948,16 @@ extension Decode {
         .map { try string("\(path).capabilities[\($0.0)]", $0.1) }
       let inputs: [FragmentArgEntry] =
         try f["inputs"].map { try fragmentArgs("\(path).inputs", $0, walk) } ?? []
+      let scopeIdV = try reqString(path, f, "scopeId")
+      let channelV = MountChannel(
+        direction: direction,
+        messageShape: try optString("\(path).channel", channelObj, "messageShape"))
       return .mount(
         MountSpec(
-          scopeId: try reqString(path, f, "scopeId"),
+          capabilities: caps,
+          channel: channelV,
           inputs: inputs,
-          channel: MountChannel(
-            direction: direction,
-            messageShape: try optString("\(path).channel", channelObj, "messageShape")),
-          capabilities: caps))
-    case let o:
-      throw err(.wrongNodeKind, "\(path).$type", "unknown NodeKind discriminator '\(o)'")
+          scopeId: scopeIdV))
     }
   }
 
@@ -1901,10 +1986,11 @@ extension Decode {
     let direction: TextDirection =
       try f["direction"].map { try bareEnum("\(path).direction", $0, "TextDirection") } ?? .auto
     return SemanticStyle(
+      direction: direction,
       emphasis: try optEmphasisDefault(path, f, "emphasis"),
-      tone: try optToneDefault(path, f, "tone"),
-      weight: try optWeightDefault(path, f, "weight"),
-      role: role, voice: voice, direction: direction)
+      role: role,
+      tone: try optToneDefault(path, f, "tone"), voice: voice,
+      weight: try optWeightDefault(path, f, "weight"))
   }
 
   /// The `Accessibility` trait's near-miss set (WIRE_FORMAT 3.1 "Near-miss slot names

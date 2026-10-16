@@ -111,12 +111,14 @@ wire; the check happens where a real destination exists.
 ```
 fuaran-swift/
 ├── Sources/FuaranUI/          # sealed tree model + the render-projection decoder (pure Swift)
-│   ├── Vocabulary.swift        #   the bare-string wire enums
+│   ├── Model.generated.swift   #   GENERATED from the corpus idl.json: enums, unions, records, kind specs, NodeKind
+│   ├── Vocabulary.swift        #   compute-layer enums + render-side projections of generated enums
 │   ├── JSON.swift              #   a small portable JSON value + parser + decode-error type
-│   ├── Bindings.swift          #   TextSource / Binding / Action / the dataframe compute layer
-│   ├── Specs.swift             #   the per-kind spec records (display / input / vis / layout / drawing / structural)
-│   ├── Node.swift              #   the Node envelope + the closed NodeKind vocabulary
+│   ├── Bindings.swift          #   Closure / StaticValue / NamedBinding / the dataframe compute layer
+│   ├── Specs.swift             #   the few hand-written model types + conveniences over generated ones
+│   ├── Node.swift              #   the Node envelope (hand-written)
 │   └── RenderProjection*.swift #   the decoder (canonical tree JSON → sealed model)
+├── Sources/FuaranUIIdlGen/     # this repository's generator over idl.json: rules, dialect, docs
 ├── Tests/FuaranUITests/        # corpus render-coverage harness + focused model tests
 ├── Package.swift
 ├── run.ps1                     # Stage-0 entry point (swift build + swift test)

@@ -80,9 +80,9 @@ private func imageSpec(
     alt: .literal("Fishing boats moored at first light"),
     src: binding(src),
     variant: .default,
-    caption: caption,
     srcSet: srcSet.map { SrcSetEntry(src: binding($0.0), width: $0.1) },
-    expandable: expandable)
+    expandable: expandable,
+    caption: caption)
 }
 
 /// A destination the §19 URL floor refuses. This surface's floor is the SCHEME

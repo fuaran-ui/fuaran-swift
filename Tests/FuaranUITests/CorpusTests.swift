@@ -8,6 +8,7 @@
 // Skips cleanly when the corpus is absent (standalone checkout).
 
 import Foundation
+import FuaranUIIdlGen
 import XCTest
 
 @testable import FuaranUI
@@ -77,7 +78,6 @@ func loadResidue(_ section: String, repoRoot: URL) throws -> Set<String> {
 /// gate did not run, rather than ran and disagreed.
 struct ResidueUnavailable: Error { let message: String }
 
-
 final class CorpusTests: XCTestCase {
   /// Locate the shared corpus relative to this source file:
   /// `<repo>/Tests/FuaranUITests/CorpusTests.swift` → `<repo>/../wire-format-fixtures`.
@@ -114,8 +114,13 @@ final class CorpusTests: XCTestCase {
 
   static func isWireCorpus(_ dir: URL) -> Bool { missingMarkers(dir).isEmpty }
 
-  /// Raised when `FUARAN_CORPUS` names something that is not this corpus.
+  /// Raised when a declaring variable names something that is not this corpus.
   struct DeclaredCorpusRefused: Error { let message: String }
+
+  /// The variables that DECLARE the corpus root, in the order they are consulted.
+  /// `FUARAN_WIRE_FIXTURES` is the name every corpus reader honours
+  /// first; `FUARAN_CORPUS` is this surface's older spelling, kept.
+  static let declaringVariables = ["FUARAN_WIRE_FIXTURES", "FUARAN_CORPUS"]
 
   /// A root declared by the operator, if any — REFUSED rather than ignored when wrong.
   ///
@@ -123,15 +128,17 @@ final class CorpusTests: XCTestCase {
   /// that looks exactly like a working one, and nobody would learn the variable was never
   /// read. Same posture as the sibling Kotlin surface's `FUARAN_CORPUS` leg.
   static func declaredCorpus() throws -> URL? {
-    guard let declared = ProcessInfo.processInfo.environment["FUARAN_CORPUS"],
-      !declared.isEmpty
-    else { return nil }
-    let url = URL(fileURLWithPath: declared)
-    if isWireCorpus(url) { return url }
-    throw DeclaredCorpusRefused(
-      message: "FUARAN_CORPUS='\(declared)' does not name the Fuaran UI wire-format corpus: "
-        + "\(missingMarkers(url)) absent. It is refused rather than ignored — falling back would "
-        + "run this gate against a corpus you did not name.")
+    let env = ProcessInfo.processInfo.environment
+    for name in declaringVariables {
+      guard let declared = env[name], !declared.isEmpty else { continue }
+      let url = URL(fileURLWithPath: declared)
+      if isWireCorpus(url) { return url }
+      throw DeclaredCorpusRefused(
+        message: "\(name)='\(declared)' does not name the Fuaran UI wire-format corpus: "
+          + "\(missingMarkers(url)) absent. It is refused rather than ignored — falling back "
+          + "would run this gate against a corpus you did not name.")
+    }
+    return nil
   }
 
   /// The repository's MAIN working tree, when this checkout is a git worktree.
@@ -226,7 +233,8 @@ final class CorpusTests: XCTestCase {
         "cross-host checkout detected (\(sibling.name)/ is present under \(sibling.under.path)) "
           + "but the wire-format-fixtures corpus is at none of [\(tried)] — this gate certified "
           + "NOTHING. If the corpus moved or was renamed, correct `corpusCandidates()` rather "
-          + "than letting the harness skip; if this is a one-off layout, name it in FUARAN_CORPUS.")
+          + "than letting the harness skip; if this is a one-off layout, name it in "
+          + "FUARAN_WIRE_FIXTURES.")
       throw CorpusMissingOnCrossHostCheckout()
     }
     throw XCTSkip("wire-format-fixtures corpus not found — standalone checkout; skipping.")
@@ -572,5 +580,102 @@ final class CorpusTests: XCTestCase {
       "\(failures.count) of \(urlFloorCases) url-floor cases failed:\n"
         + failures.joined(separator: "\n"))
     print("SANITIZATION url-floor: \(urlFloorCases) cases asserted against the URL floor")
+  }
+}
+
+// ─── The generated model (Phase 2299) ─────────────────────────────────────────
+
+/// The sealed tree model in `Sources/FuaranUI/Model.generated.swift` is GENERATED
+/// from the corpus's `idl.json` by `Sources/FuaranUIIdlGen`. This is both the
+/// drift check and the regeneration: without `FUARAN_IDL_REGENERATE=1` it
+/// regenerates in memory and fails when the committed file differs — red when
+/// the IDL moved and the model did not — and with it, it rewrites the file.
+///
+/// This replaces mirror-keeping by hand. The hand model could only be compared
+/// with the vocabulary by a test that read both; the generated one cannot drift
+/// from the IDL it records the hash of without this test going red, and a kind
+/// the IDL gains becomes a build error at the decoder's exhaustive dispatch
+/// over `NodeKindTag` the moment it is regenerated.
+final class GeneratedModelTests: XCTestCase {
+  static var generatedFile: URL {
+    CorpusTests.repoRoot.appendingPathComponent(IdlCodegen.generatedRelativePath)
+  }
+
+  func idlBytes() throws -> Data {
+    try Data(contentsOf: try CorpusTests.requireCorpus().appendingPathComponent("idl.json"))
+  }
+
+  func testTheGeneratedModelIsTheCorpusIdlRegenerated() throws {
+    let bytes = try idlBytes()
+    let fresh = try IdlCodegen.generate(idl: bytes)
+    if ProcessInfo.processInfo.environment["FUARAN_IDL_REGENERATE"] == "1" {
+      try Data(fresh.utf8).write(to: Self.generatedFile)
+      print("REGENERATED \(Self.generatedFile.path) (idl.json sha256 \(IdlCodegen.sha256(bytes)))")
+      return
+    }
+    let committed = try String(contentsOf: Self.generatedFile, encoding: .utf8)
+    guard committed != fresh else { return }
+    let at = zip(
+      committed.split(separator: "\n", omittingEmptySubsequences: false),
+      fresh.split(separator: "\n", omittingEmptySubsequences: false)
+    ).enumerated().first { $0.element.0 != $0.element.1 }
+    XCTFail(
+      "\(IdlCodegen.generatedRelativePath) is not the corpus idl.json regenerated (idl.json sha256 "
+        + "\(IdlCodegen.sha256(bytes)), the file records \(GeneratedModel.idlSha256)). "
+        + "First difference at line \((at?.offset ?? 0) + 1): committed "
+        + "\(String(describing: at?.element.0)) vs generated \(String(describing: at?.element.1)). "
+        + "Regenerate with `\(IdlCodegen.regenerateCommand)` and read the diff: a moved IDL "
+        + "reaches this surface as compile errors at the switches that must now decide.")
+  }
+
+  /// The IDL with one field removed from a kind, or one field's optionality
+  /// replaced — the two ways a dialect entry goes stale.
+  func perturbed(kind tag: String, field: String, optionality: String? = nil) throws -> Data {
+    var root = try XCTUnwrap(
+      try JSONSerialization.jsonObject(with: try idlBytes()) as? [String: Any])
+    var kinds = try XCTUnwrap(root["kinds"] as? [[String: Any]])
+    let k = try XCTUnwrap(kinds.firstIndex { ($0["tag"] as? String) == tag })
+    var fields = try XCTUnwrap(kinds[k]["fields"] as? [[String: Any]])
+    let i = try XCTUnwrap(fields.firstIndex { ($0["name"] as? String) == field })
+    if let optionality {
+      fields[i]["optionality"] = ["$type": optionality]
+    } else {
+      fields.remove(at: i)
+    }
+    kinds[k]["fields"] = fields
+    root["kinds"] = kinds
+    return try JSONSerialization.data(withJSONObject: root)
+  }
+
+  func refusal(_ idl: Data) -> String? {
+    do {
+      _ = try IdlCodegen.generate(idl: idl)
+      return nil
+    } catch {
+      return "\(error)"
+    }
+  }
+
+  /// A dialect entry naming a field the IDL no longer has is REFUSED, not carried.
+  func testAnEntryNamingAFieldTheIdlNoLongerHasIsRefused() throws {
+    let message = refusal(try perturbed(kind: "Chart", field: "valueFormat"))
+    XCTAssertNotNil(message, "the generator accepted an omission of a field the IDL does not have")
+    XCTAssertTrue(message?.contains("omit|kind Chart.valueFormat") == true, message ?? "")
+  }
+
+  /// A dialect entry that the rules would now produce on their own is REFUSED.
+  func testAnEntryTheRulesNowProduceIsRefused() throws {
+    // `Select.multiple` is optional in the IDL and total (`Bool`) by dialect; were
+    // the IDL to make it required, the rules would produce `Bool` themselves.
+    let message = refusal(try perturbed(kind: "Select", field: "multiple", optionality: "required"))
+    XCTAssertNotNil(message, "the generator accepted an entry the rules already produce")
+    XCTAssertTrue(message?.contains("kind Select.multiple") == true, message ?? "")
+    XCTAssertTrue(message?.contains("what the rules produce") == true, message ?? "")
+  }
+
+  /// The unperturbed IDL generates (the two refusals above are not the generator
+  /// refusing everything).
+  func testTheCorpusIdlGenerates() throws {
+    XCTAssertNil(refusal(try idlBytes()))
   }
 }

@@ -24,7 +24,7 @@ final class UploadCeilingTests: XCTestCase {
   {
     FileUploadSpec(
       accept: ["application/pdf"], label: .literal("Attach a scan"), multiple: multiple,
-      disabled: nil, dropTarget: false, acceptPaste: false, capture: nil, destination: nil,
+      disabled: nil, acceptPaste: false, dropTarget: false, capture: nil, destination: nil,
       maxBytes: maxBytes, maxFiles: maxFiles)
   }
 

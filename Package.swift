@@ -85,9 +85,18 @@ targets.append(
     name: "FuaranUIDriverTests", dependencies: ["FuaranUI", "FuaranUIDriver"],
     swiftSettings: testSwiftSettings, linkerSettings: testLinkerSettings))
 
+// Phase 2299: this repository's own generator over the wire corpus's published
+// `idl.json`, which writes the sealed tree model (`Sources/FuaranUI/Model.generated.swift`).
+// Foundation only, and in no product: a consumer of the package never builds it and
+// never needs the corpus. `FuaranUITests` drives it as the regenerate-or-drift check;
+// `swift run fuaran-idl-gen <idl.json>` runs it directly.
+targets.append(.target(name: "FuaranUIIdlGen"))
+targets.append(
+  .executableTarget(name: "fuaran-idl-gen", dependencies: ["FuaranUIIdlGen"]))
+
 targets.append(
   .testTarget(
-    name: "FuaranUITests", dependencies: ["FuaranUI"],
+    name: "FuaranUITests", dependencies: ["FuaranUI", "FuaranUIIdlGen"],
     swiftSettings: testSwiftSettings, linkerSettings: testLinkerSettings))
 
 let package = Package(

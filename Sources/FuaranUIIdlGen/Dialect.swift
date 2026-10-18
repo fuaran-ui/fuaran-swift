@@ -210,52 +210,29 @@ let dialect: [DialectEntry] =
     ),
     entry(.unlabeled("union Action.Chain"), "the public case has always been `chain([Action])`"),
 
-    // ── Not modelled by this render projection ───────────────────────────────
-    // A decode-only projection drops what it does not render; an unknown or
-    // unmodelled key is tolerated on decode, never refused.
-    entry(.omit("kind Chart.valueFormat"), "not modelled by this projection's chart floor"),
-    entry(.omit("kind Chart.xTitle"), "not modelled by this projection's chart floor"),
-    entry(.omit("kind Chart.yTitle"), "not modelled by this projection's chart floor"),
-    entry(.omit("kind Chart.subtitle"), "not modelled by this projection's chart floor"),
-    entry(.omit("kind Chart.legendPosition"), "not modelled by this projection's chart floor"),
-    entry(.omit("kind Chart.dataLabels"), "not modelled by this projection's chart floor"),
-    entry(.omit("kind Chart.xScale"), "not modelled by this projection's chart floor"),
-    entry(.omit("kind DataGrid.reorderable"), "row reordering is not rendered by this projection"),
-    entry(
-      .omit("kind DataGrid.windowStateKey"),
-      "the grid window protocol is not rendered by this projection"),
-    entry(
-      .omit("kind DataGrid.rowTotal"), "the grid window protocol is not rendered by this projection"
-    ),
-    entry(
-      .omit("kind FileUpload.onSelect"),
-      "the selection handler is a closure this projection never invokes"),
-    entry(.omit("kind Modal.anchor"), "popover anchoring is not rendered by this projection"),
-    entry(
-      .omit("kind Mount.onBubble"), "the bubble handler is a closure this projection never invokes"),
-    entry(
-      .omit("kind Stepper.onSelect"), "the step handler is a closure this projection never invokes"),
-    entry(
-      .omit("record ColumnErased.sortable"), "per-column sorting is not rendered by this projection"
-    ),
-    entry(
-      .omit("record ColumnErased.editable"), "per-column editing is not rendered by this projection"
-    ),
+    // ── Union-case payload members left out ──────────────────────────────────
+    // A kind's or a record's field is never omitted (the generator refuses it,
+    // Phase 2331): it is carried, and one this projection does not render is a
+    // documented render absence. What remains are closure slots inside a union
+    // case's payload, whose wire form is the presence-only `"<closure>"`
+    // sentinel, and which an unknown-key-tolerant decode reads past. Adding a
+    // member to a public enum case's payload breaks every pattern and every
+    // construction of that case, so each waits for a breaking release.
     entry(
       .omit("union Action.ReadFileBody.onRead"),
-      "the read handler is a closure this projection never invokes"),
+      "a presence-only closure slot; adding it to the public case's payload is a source break"),
     entry(
       .omit("union CellKindErased.Editable.onEdit"),
-      "cell handlers are closures this projection never invokes"),
+      "a presence-only closure slot; adding it to the public case's payload is a source break"),
     entry(
       .omit("union CellKindErased.Checkbox.onToggle"),
-      "cell handlers are closures this projection never invokes"),
+      "a presence-only closure slot; adding it to the public case's payload is a source break"),
     entry(
       .omit("union CellKindErased.Button.onClick"),
-      "cell handlers are closures this projection never invokes"),
+      "a presence-only closure slot; adding it to the public case's payload is a source break"),
     entry(
       .omit("union CellKindErased.Progress.labelFn"),
-      "cell projections are closures this projection never invokes"),
+      "a presence-only closure slot; adding it to the public case's payload is a source break"),
 
     // ── Public payload order (an enum case's associated values are positional API) ──
     entry(

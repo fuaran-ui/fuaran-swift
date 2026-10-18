@@ -49,6 +49,18 @@ enum Decode {
     err(.unknownDuCase, "\(path).$type", "unknown discriminator '\(got)'; expected \(expected)")
   }
 
+  /// The case a union's `$type` names, read against the union's GENERATED tag set
+  /// (Phase 2331). Every caller switches over the result with no `default`, so a case
+  /// the IDL gains is a build error at that switch rather than a run-time refusal
+  /// here; an unknown tag is the `unknownCase` refusal, naming the generated set.
+  /// `aliases` maps a §16 lenient spelling onto the case it decodes as.
+  static func unionTag<T: RawRepresentable & CaseIterable>(
+    _ path: String, _ raw: String, _: T.Type, aliases: [String: T] = [:]
+  ) throws -> T where T.RawValue == String {
+    if let tag = T(rawValue: raw) ?? aliases[raw] { return tag }
+    throw unknownCase(path, raw, T.allCases.map(\.rawValue).joined(separator: " | "))
+  }
+
   /// An unrecognised case of a BARE enum — a plain JSON string in a named field
   /// (`style.tone`, `kind.trendPolarity`, `kind.protection`,
   /// `accessibility.liveRegion`, a `defaultSort.direction`, a
@@ -641,92 +653,81 @@ extension Decode {
 
   static func localFlush(_ path: String, _ j: JSON) throws -> LocalFlushTrigger {
     let f = try object(path, j)
-    switch try disc(path, f) {
-    case "OnBlur": return .onBlur
-    case "OnSubmit": return .onSubmit
-    case "OnCommitAction": return .onCommitAction
-    case "OnDebounce": return .onDebounce(milliseconds: try reqInt(path, f, "milliseconds"))
-    case let o: throw unknownCase(path, o, "OnBlur | OnSubmit | OnDebounce | OnCommitAction")
+    switch try unionTag(path, try disc(path, f), LocalFlushTriggerTag.self) {
+    case .onBlur: return .onBlur
+    case .onSubmit: return .onSubmit
+    case .onCommitAction: return .onCommitAction
+    case .onDebounce: return .onDebounce(milliseconds: try reqInt(path, f, "milliseconds"))
     }
   }
 
   static func format(_ path: String, _ j: JSON) throws -> Format {
     let f = try object(path, j)
-    switch try disc(path, f) {
-    case "Number": return .number(decimals: try optInt(path, f, "decimals"))
-    case "Currency": return .currency(isoCode: try reqString(path, f, "isoCode"))
-    case "Percent": return .percent(decimals: try optInt(path, f, "decimals"))
+    switch try unionTag(path, try disc(path, f), FormatTag.self, aliases: ["Date": .dateTime]) {
+    case .number: return .number(decimals: try optInt(path, f, "decimals"))
+    case .currency: return .currency(isoCode: try reqString(path, f, "isoCode"))
+    case .percent: return .percent(decimals: try optInt(path, f, "decimals"))
     // Phase 1811 — `DateTime` is canonical; `Date` (the pre-rename spelling) is its
     // §16 lenient alias, decoded to the same value. Phase 1810 — both style slots
     // are optional; neither present is the validator's subject, not a shape error.
-    case "DateTime", "Date":
+    case .dateTime:
       return .dateTime(
         dateStyle: try f["dateStyle"].map { try bareEnum("\(path).dateStyle", $0, "DateStyle") },
         timeStyle: try f["timeStyle"].map { try bareEnum("\(path).timeStyle", $0, "TimeStyle") })
-    case "RelativeTime":
+    case .relativeTime:
       return .relativeTime(
         unit: try bareEnum("\(path).unit", try req(path, f, "unit"), "RelativeTimeUnit"))
     // Phase 1533 — `unit` is OPTIONAL here and its absence is the
     // auto-selection request, not a default. Present-but-unreadable is still a
     // refusal.
-    case "Since":
+    case .since:
       var sinceUnit: RelativeTimeUnit? = nil
       if let u = f["unit"] {
         sinceUnit = try bareEnum("\(path).unit", u, "RelativeTimeUnit")
       }
       return .since(unit: sinceUnit)
-    case "Duration":
+    case .duration:
       return .duration(
         unit: try bareEnum("\(path).unit", try req(path, f, "unit"), "DurationUnit"),
         style: try bareEnum("\(path).style", try req(path, f, "style"), "DurationStyle"))
-    case let o:
-      throw unknownCase(
-        path, o, "Number | Currency | Percent | Date | RelativeTime | Since | Duration")
     }
   }
 
   static func localeSource(_ path: String, _ j: JSON) throws -> LocaleSource {
     let f = try object(path, j)
-    switch try disc(path, f) {
-    case "Ambient": return .ambient
-    case "Explicit": return .explicit(tag: try reqString(path, f, "tag"))
-    case let o: throw unknownCase(path, o, "Ambient | Explicit")
+    switch try unionTag(path, try disc(path, f), LocaleSourceTag.self) {
+    case .ambient: return .ambient
+    case .explicit: return .explicit(tag: try reqString(path, f, "tag"))
     }
   }
 
   static func cellFormat(_ path: String, _ j: JSON) throws -> CellFormat {
     let f = try object(path, j)
-    switch try disc(path, f) {
-    case "None": return .none
-    case "Number": return .number(decimals: try optInt(path, f, "decimals"))
-    case "Currency": return .currency(code: try reqString(path, f, "code"))
-    case "Percent": return .percent(decimals: try optInt(path, f, "decimals"))
-    case "SignificantDigits": return .significantDigits(digits: try reqInt(path, f, "digits"))
+    switch try unionTag(path, try disc(path, f), CellFormatTag.self, aliases: ["Date": .dateTime]) {
+    case .none: return .none
+    case .number: return .number(decimals: try optInt(path, f, "decimals"))
+    case .currency: return .currency(code: try reqString(path, f, "code"))
+    case .percent: return .percent(decimals: try optInt(path, f, "decimals"))
+    case .significantDigits: return .significantDigits(digits: try reqInt(path, f, "digits"))
     // Phase 1811 — `DateTime` is canonical; `Date` is its §16 lenient alias.
-    case "DateTime", "Date": return .dateTime(format: try reqString(path, f, "format"))
-    case "Duration":
+    case .dateTime: return .dateTime(format: try reqString(path, f, "format"))
+    case .duration:
       return .duration(
         unit: try bareEnum("\(path).unit", try req(path, f, "unit"), "DurationUnit"),
         style: try bareEnum("\(path).style", try req(path, f, "style"), "DurationStyle"))
-    case "RelativeTime":
+    case .relativeTime:
       return .relativeTime(
         unit: try bareEnum("\(path).unit", try req(path, f, "unit"), "RelativeTimeUnit"))
-    case "Custom": return .custom
-    case let o:
-      throw unknownCase(
-        path, o,
-        "None | Number | Currency | Percent | SignificantDigits | Date | Duration | RelativeTime | Custom"
-      )
+    case .custom: return .custom
     }
   }
 
   static func columnWidth(_ path: String, _ j: JSON) throws -> ColumnWidth {
     let f = try object(path, j)
-    switch try disc(path, f) {
-    case "Auto": return .auto
-    case "Fixed": return .fixed(pixels: try reqInt(path, f, "pixels"))
-    case "Flex": return .flex(weight: try reqFloat(path, f, "weight"))
-    case let o: throw unknownCase(path, o, "Auto | Fixed | Flex")
+    switch try unionTag(path, try disc(path, f), ColumnWidthTag.self) {
+    case .auto: return .auto
+    case .fixed: return .fixed(pixels: try reqInt(path, f, "pixels"))
+    case .flex: return .flex(weight: try reqFloat(path, f, "weight"))
     }
   }
 
@@ -767,15 +768,23 @@ extension Decode {
     default: break
     }
     let f = try object(path, j)
-    switch try disc(path, f) {
-    case "Static":
+    let tag = try disc(path, f)
+    // Lenient AI-ingest: the `TextSource.Bound` wrapper convention transferred
+    // to a bare-Binding slot — `{"$type":"Bound","binding":X}` carries exactly
+    // one payload field, so the unwrap is one-to-one. Decode-only, and not a
+    // Binding case, so it is read before the dispatch over the case set.
+    if tag == "Bound" {
+      return try bindingSlot("\(path).binding", try req(path, f, "binding"), slot)
+    }
+    switch try unionTag(path, tag, BindingTag.self) {
+    case .staticValue:
       // Phase 677 — absence is structural: a MISSING `value` means the binding
       // carries none. The legacy `"value": null` spelling still decodes (§16
       // shorthand) by routing to the very same per-slot parse, so the two
       // spellings cannot disagree.
       let v = f["value"] ?? .null
       return .staticValue(try slot.parse("\(path).value", v))
-    case "Query":
+    case .query:
       let name = try reqString(path, f, "name")
       var dependsOn: [String]? = nil
       // Field aliases: deps / dependencies → dependsOn.
@@ -784,20 +793,20 @@ extension Decode {
         dependsOn = try items.map { try string("\(path).dependsOn[]", $0) }
       }
       return .query(name: name, dependsOn: dependsOn)
-    case "Filter":
+    case .filter:
       // 0.2.0 — optional `defaultValue`, decoded through the slot's typed
       // static parser; a parse failure reads as absent (reference leniency).
       let name = try reqString(path, f, "name")
       let dv = f["defaultValue"].flatMap { try? slot.parse("\(path).defaultValue", $0) }
       return .filter(name: name, defaultValue: dv)
-    case "Selection":
+    case .selection:
       // 0.2.9 — optional `defaultValue`; 0.2.10 — optional `field`.
       let nodeId = try reqString(path, f, "nodeId")
       let dv = f["defaultValue"].flatMap { try? slot.parse("\(path).defaultValue", $0) }
       let field: String?
       if case .string(let s)? = f["field"] { field = s } else { field = nil }
       return .selection(nodeId: nodeId, defaultValue: dv, field: field)
-    case "State":
+    case .state:
       let key = try reqString(path, f, "key")
       let dv: StaticValue
       // Field aliases: initialValue / default → defaultValue.
@@ -807,19 +816,19 @@ extension Decode {
       let rawDefault = getAliased(f, "defaultValue", ["initialValue", "default"]) ?? .null
       dv = (try? slot.parse("\(path).defaultValue", rawDefault)) ?? slot.placeholder()
       return .state(key: key, defaultValue: dv)
-    case "Computed": return .computed
+    case .computed: return .computed
     // The host-furnished instant - no payload; the host clock supplies the value.
     // Phase 1533 — the declared `grain` is the one wire field, optional, absent
     // meaning `Second`. Present-but-unreadable is a REFUSAL rather than a
     // silent fallback to the default: a document naming a grain the host cannot
     // honour must not be rendered at a neighbouring resolution in silence.
-    case "Now":
+    case .now:
       var grain: TimeGrain? = nil
       if let g = f["grain"] {
         grain = try bareEnum("\(path).grain", g, "TimeGrain")
       }
       return .now(grain: grain)
-    case "I18n":
+    case .i18n:
       let key = try reqString(path, f, "key")
       var args: [NamedBinding]? = nil
       if let v = f["args"] {
@@ -833,7 +842,7 @@ extension Decode {
         }
       }
       return .i18n(key: key, args: args)
-    case "Local":
+    case .local:
       let initial = try bindingSlot(
         "\(path).initialFrom", try req(path, f, "initialFrom"), slot)
       let flush: LocalFlushTrigger
@@ -877,12 +886,12 @@ extension Decode {
       return .local(
         codec: codec, commitTo: commitTo, flushOn: flush, initialFrom: initial,
         onCommit: onCommit)
-    case "Format":
+    case .format:
       let source = try binding("\(path).source", try req(path, f, "source"))
       let fmt = try format("\(path).format", try req(path, f, "format"))
       let loc = try localeSource("\(path).locale", try req(path, f, "locale"))
       return .format(format: fmt, locale: loc, source: source)
-    case "Transform":
+    case .transform:
       let source = try dataSource("\(path).source", try req(path, f, "source"))
       let pipeline = try pipelineSteps("\(path).pipeline", try req(path, f, "pipeline"))
       return .transform(
@@ -891,7 +900,7 @@ extension Decode {
     // expression is the SAME `ColExpr` algebra a `Transform` pipeline step
     // carries, decoded by the same codec, so there is one algebra to specify,
     // certify and teach rather than two that drift apart.
-    case "Expr":
+    case .expr:
       let exprPath = "\(path).expr"
       let e = try colExpr(exprPath, try req(path, f, "expr"))
       // §21.8 — the evaluation bound, counted per EXPRESSION rather than per
@@ -926,20 +935,10 @@ extension Decode {
             + "is not")
       }
       return .expr(expr: e, params: exprParams)
-    case "Invoke":
+    case .invoke:
       return .invoke(
         capabilityId: try reqString(path, f, "capabilityId"),
         args: try invokeArgs("\(path).args", try req(path, f, "args")))
-    // Lenient AI-ingest: the `TextSource.Bound` wrapper convention transferred
-    // to a bare-Binding slot — `{"$type":"Bound","binding":X}` carries exactly
-    // one payload field, so the unwrap is one-to-one. Decode-only.
-    case "Bound":
-      return try bindingSlot("\(path).binding", try req(path, f, "binding"), slot)
-    case let o:
-      throw unknownCase(
-        path, o,
-        "Static | Query | Filter | Selection | State | Computed | I18n | Local | Format | Transform | Invoke"
-      )
     }
   }
 
@@ -956,15 +955,14 @@ extension Decode {
   static func textSource(_ path: String, _ j: JSON) throws -> TextSource {
     if case .string(let s) = j { return .literal(s) }  // §16 bare-string shorthand
     let f = try object(path, j)
-    switch try disc(path, f) {
-    case "Literal": return .literal(try reqString(path, f, "text"))
-    case "Bound":
+    switch try unionTag(path, try disc(path, f), TextSourceTag.self) {
+    case .literal: return .literal(try reqString(path, f, "text"))
+    case .bound:
       return .bound(try binding("\(path).binding", try req(path, f, "binding")))
-    case "I18n":
+    case .i18n:
       let key = try reqString(path, f, "key")
       let args = try f["args"].map { try i18nArgs("\(path).args", $0) } ?? [:]
       return .i18n(key: key, args: args)
-    case let o: throw unknownCase(path, o, "Literal | Bound | I18n")
     }
   }
 
@@ -982,23 +980,22 @@ extension Decode {
 
   static func action(_ path: String, _ j: JSON) throws -> Action {
     let f = try object(path, j)
-    switch try disc(path, f) {
-    case "Dispatch": return .dispatch
-    case "Call":
+    switch try unionTag(path, try disc(path, f), ActionTag.self) {
+    case .dispatch: return .dispatch
+    case .call:
       // Field alias: url → endpoint.
       let endpoint = try reqStringAliased(path, f, "endpoint", ["url"])
       var into: CallResultTarget? = nil
       if let v = f["into"] {
         let ip = "\(path).into"
         let io = try object(ip, v)
-        switch try disc(ip, io) {
-        case "State": into = .state(key: try reqString(ip, io, "key"))
-        case "Query": into = .query(name: try reqString(ip, io, "name"))
-        case let o: throw unknownCase(ip, o, "State | Query")
+        switch try unionTag(ip, try disc(ip, io), CallResultTargetTag.self) {
+        case .state: into = .state(key: try reqString(ip, io, "key"))
+        case .query: into = .query(name: try reqString(ip, io, "name"))
         }
       }
       return .call(endpoint: endpoint, into: into, onResult: optClosure(f, "onResult"))
-    case "Notify":
+    case .notify:
       return .notify(
         channel: try reqString(path, f, "channel"),
         payload: try jval("\(path).payload", try req(path, f, "payload")))
@@ -1009,7 +1006,7 @@ extension Decode {
     // string IS `Literal`'s canonical form, so every document written before
     // the widening decodes exactly as it did — aliases included, since they
     // resolve before the value is decoded. `target` is omitted at `Self`.
-    case "Navigate":
+    case .navigate:
       var navTarget = NavigateTarget.selfWindow
       if let t = f["target"] {
         navTarget = try bareEnum("\(path).target", t, "NavigateTarget")
@@ -1017,7 +1014,7 @@ extension Decode {
       return .navigate(
         route: try reqTextSourceAliased(path, f, "route", ["href", "url", "to"]),
         target: navTarget)
-    case "SetState":
+    case .setState:
       // `oneOf: [required value, required valueFrom]` - a literal payload OR a binding
       // resolved at dispatch time, never both. Both-present is refused rather than settled
       // by precedence: the two say different things about where the value comes from, and
@@ -1035,20 +1032,20 @@ extension Decode {
       if let rf = rawFrom { setFrom = try binding("\(path).valueFrom", rf) }
       return .setState(
         key: try reqString(path, f, "key"), value: setValue, valueFrom: setFrom)
-    case "AiTool":
+    case .aiTool:
       return .aiTool(
         toolName: try reqString(path, f, "toolName"),
         args: try jval("\(path).args", try req(path, f, "args")))
-    case "Chain":
+    case .chain:
       let items = try array("\(path).ops", try req(path, f, "ops"))
       return .chain(try items.enumerated().map { try action("\(path).ops[\($0.0)]", $0.1) })
-    case "CommitLocal": return .commitLocal(nodeId: try reqString(path, f, "nodeId"))
+    case .commitLocal: return .commitLocal(nodeId: try reqString(path, f, "nodeId"))
     // Phase 1126 — the payload is a `TextSource`; the bare string IS
     // `Literal`'s canonical form, so the explicit envelope normalises down to
     // it here as at every other text slot (§16). Never coerced from a non-text
     // JSON value: a host reading the widening as "this member is now open"
     // would put a JSON literal on the reader's clipboard.
-    case "WriteToClipboard": return .writeToClipboard(text: try reqTextSource(path, f, "text"))
+    case .writeToClipboard: return .writeToClipboard(text: try reqTextSource(path, f, "text"))
     // Phase 1124 — the payload-free print, and the ONE action arm strict about
     // unrecognised members. Everywhere else in this format an unknown member is
     // one the reading host has not learned yet, and dropping it is the
@@ -1057,7 +1054,7 @@ extension Decode {
     // it had constrained a printing it had not. The refusal names the offending
     // member's own path, taking the FIRST in sorted order so which member is
     // named is deterministic rather than a function of dictionary order.
-    case "Print":
+    case .print:
       let extras = f.keys.filter { $0 != "$type" }.sorted()
       if let first = extras.first {
         throw wrongType("\(path).\(first)", "no member beside $type — Print takes no payload")
@@ -1069,7 +1066,7 @@ extension Decode {
     // `$type`, so a nested confirm inside a `Chain` is caught by the same line
     // that catches a bare one. A dialogue that answers a dialogue is a modal
     // stack the reader cannot escape, and it says nothing one question does not.
-    case "Confirm":
+    case .confirm:
       let prompt = try reqTextSource(path, f, "prompt")
       let onConfirm = try action("\(path).onConfirm", try req(path, f, "onConfirm"))
       try refuseNestedConfirm(onConfirm, "\(path).onConfirm")
@@ -1082,21 +1079,16 @@ extension Decode {
       return .confirm(prompt: prompt, onConfirm: onConfirm, onCancel: onCancel)
     // Phase 1537 — a bare node id, the `CommitLocal` shape above. It addresses
     // a node in THIS document, so there is nothing for a binding to compute.
-    case "Focus": return .focus(nodeId: try reqString(path, f, "nodeId"))
-    case "ReadFileBody":
+    case .focus: return .focus(nodeId: try reqString(path, f, "nodeId"))
+    case .readFileBody:
       return .readFileBody(
         fileRef: try reqString(path, f, "fileRef"),
         encoding: try bareEnum(
           "\(path).encoding", try req(path, f, "encoding"), "FileReadEncoding"))
-    case "Invoke":
+    case .invoke:
       return .invoke(
         capabilityId: try reqString(path, f, "capabilityId"),
         args: try invokeArgs("\(path).args", try req(path, f, "args")))
-    case let o:
-      throw unknownCase(
-        path, o,
-        "Dispatch | Call | Notify | Navigate | SetState | AiTool | Chain | CommitLocal | WriteToClipboard | Print | Confirm | Focus | ReadFileBody | Invoke"
-      )
     }
   }
 

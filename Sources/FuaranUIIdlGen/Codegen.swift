@@ -41,6 +41,11 @@
 //   finite); a union is `indirect` when it reaches itself through inline slots.
 // - Emission. What the node kinds and the hand-written node envelope reach
 //   through modelled fields — an IDL type nothing modelled reaches is not emitted.
+// - Every field of a kind or a record is modelled (Phase 2331): the dialect may
+//   leave out only a member of a union case's payload. A field the IDL gains is
+//   therefore carried by regeneration, never dropped.
+// - Tag sets. Every IDL union, hand-written or not, also gets `<Name>Tag`, its
+//   closed `$type` set, which the decoder's dispatch switches over exhaustively.
 
 import Foundation
 
@@ -55,7 +60,13 @@ public enum IdlCodegen {
   /// The generated model for `idl` (the exact bytes of `idl.json`), or the
   /// refusal naming why it cannot be generated.
   public static func generate(idl bytes: Data) throws -> String {
-    var g = Generator(idl: try IdlReader.read(bytes))
+    try generate(idl: bytes, dialect: dialect)
+  }
+
+  /// The generated model under `entries` in place of this surface's dialect — the
+  /// seam the generator's own refusal tests drive.
+  static func generate(idl bytes: Data, dialect entries: [DialectEntry]) throws -> String {
+    var g = Generator(idl: try IdlReader.read(bytes), entries: entries)
     return try g.emit(idlSha256: Sha256.hex(bytes))
   }
 
@@ -94,6 +105,8 @@ private struct Modelled {
 
 private struct Generator {
   let idl: Idl
+  /// The dialect this generation applies.
+  let entries: [DialectEntry]
   /// Dialect entries by `<rule>|<address>`.
   var index: [String: Int] = [:]
   var used = Set<Int>()
@@ -101,8 +114,9 @@ private struct Generator {
   var usedDocs = Set<String>()
   let inits: [String: String]
 
-  init(idl: Idl) {
+  init(idl: Idl, entries: [DialectEntry]) {
     self.idl = idl
+    self.entries = entries
     var inits: [String: String] = [:]
     for (addr, reason) in publicInitialisers { inits[addr] = reason }
     self.inits = inits
@@ -127,7 +141,7 @@ private struct Generator {
   }
 
   mutating func buildIndex() throws {
-    for (i, e) in dialect.enumerated() {
+    for (i, e) in entries.enumerated() {
       let k = Self.key(e.subject)
       if index[k] != nil { throw IdlCodegenError("Dialect.swift: two entries for \(k)") }
       if e.reason.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -140,7 +154,7 @@ private struct Generator {
   mutating func take(_ rule: String, _ address: String) -> DialectEntry.Subject? {
     guard let i = index["\(rule)|\(address)"] else { return nil }
     used.insert(i)
-    return dialect[i].subject
+    return entries[i].subject
   }
 
   func refuse(_ address: String, _ why: String) -> IdlCodegenError {
@@ -259,6 +273,17 @@ private struct Generator {
       }()
       if take("omit", addr) != nil {
         if ruleOmits { throw refuse(addr, "omits a field the rules already leave unmodelled") }
+        // Phase 2331 — a kind's or a record's field is ALWAYS carried: adding an
+        // optional stored property is additive, so nothing justifies dropping one,
+        // and a field this projection cannot yet render is a documented render
+        // absence, not a model omission. Only a union case's payload member may be
+        // left out, because adding one to a public enum case is a source break.
+        guard owner.hasPrefix("union ") else {
+          throw refuse(
+            addr,
+            "drops a field of a kind or a record; every such field is carried, and one this "
+              + "projection does not render is declared in docs/RENDER-PROJECTION.md instead")
+        }
         continue
       }
       if ruleOmits { continue }
@@ -341,7 +366,7 @@ private struct Generator {
   }
 
   func idlName(forSwift s: String) -> String? {
-    for e in dialect {
+    for e in entries {
       if case .typeName(let a, let swift) = e.subject, swift == s, !a.hasPrefix("kind ") {
         return String(a.split(separator: " ", maxSplits: 1)[1])
       }
@@ -504,6 +529,23 @@ private struct Generator {
       o.line("}")
     }
 
+    // Union tag sets (Phase 2331) — for EVERY union, whether or not the model reaches
+    // it by a generated type: the decoder dispatches on the wire tag either way (a
+    // hand-written union such as `FragmentArg` included).
+    o.section("Union tag sets: the closed `$type` set of each union")
+    o.line("// The decoder dispatches on these with an exhaustive `switch`, so a case the IDL")
+    o.line("// gains is a build error there until its arm is written, never a run-time refusal.")
+    for u in idl.unions {
+      let name = try typeName("union \(u.name)", rule: u.name) + "Tag"
+      o.blank()
+      o.line("/// The closed `$type` set of `\(u.name)`.")
+      o.line("enum \(name): String, CaseIterable {")
+      for c in u.cases {
+        o.line("  case \(try unionCaseIdent(u, tag: c.tag)) = \"\(c.tag)\"")
+      }
+      o.line("}")
+    }
+
     // Records.
     o.section("Records")
     for r in idl.records where reach.contains(r.name) && !isHand("record \(r.name)") {
@@ -659,7 +701,7 @@ private struct Generator {
 
   func checkComplete() throws {
     var stale: [String] = []
-    for (i, e) in dialect.enumerated() where !used.contains(i) && !isHandEntry(e) {
+    for (i, e) in entries.enumerated() where !used.contains(i) && !isHandEntry(e) {
       stale.append("\(Self.key(e.subject)) (\(e.reason))")
     }
     for (addr, _) in publicInitialisers where !usedInit.contains(addr) {

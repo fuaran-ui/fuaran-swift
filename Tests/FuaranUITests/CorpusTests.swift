@@ -8,10 +8,11 @@
 // Skips cleanly when the corpus is absent (standalone checkout).
 
 import Foundation
-import FuaranUIIdlGen
+import FuaranWireCorpus
 import XCTest
 
 @testable import FuaranUI
+@testable import FuaranUIIdlGen
 
 /// Raised when the corpus is absent from a checkout that plainly has one. Distinct from
 /// `XCTSkip`, which is what a genuinely standalone clone gets.
@@ -79,165 +80,28 @@ func loadResidue(_ section: String, repoRoot: URL) throws -> Set<String> {
 struct ResidueUnavailable: Error { let message: String }
 
 final class CorpusTests: XCTestCase {
-  /// Locate the shared corpus relative to this source file:
-  /// `<repo>/Tests/FuaranUITests/CorpusTests.swift` → `<repo>/../wire-format-fixtures`.
-  static func corpusDir() -> URL? {
-    for candidate in corpusCandidates() where isWireCorpus(candidate) { return candidate }
-    return nil
-  }
+  // The locator itself is `WireCorpus` (Phase 2331), shared with the renderer suite;
+  // these are this suite's names for it.
 
-  static var repoRoot: URL {
-    URL(fileURLWithPath: #filePath)
-      .deletingLastPathComponent()  // FuaranUITests
-      .deletingLastPathComponent()  // Tests
-      .deletingLastPathComponent()  // fuaran-swift
-  }
+  static func corpusDir() -> URL? { WireCorpus.undeclared() }
 
-  static var expectedCorpusPath: URL {
-    repoRoot.deletingLastPathComponent().appendingPathComponent("wire-format-fixtures")
-  }
-
-  /// The files that identify THIS corpus, as opposed to any other corpus in the estate.
-  ///
-  /// `manifest.json` alone identifies nothing: the wire corpus's own `sanitization/`,
-  /// `dag/` and `merge-conformance/` sub-corpora each carry one, and so does every other
-  /// specification corpus in the estate. A predicate that accepts any directory holding a
-  /// `manifest.json` therefore ACCEPTS a wrong corpus and fails downstream with "fixture X
-  /// is absent" — loud, and about the wrong thing.
-  static let corpusIdentityMarkers = ["manifest.json", "idl.json", "WIRE_FORMAT.md"]
-
-  static func missingMarkers(_ dir: URL) -> [String] {
-    corpusIdentityMarkers.filter {
-      !FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path)
-    }
-  }
-
-  static func isWireCorpus(_ dir: URL) -> Bool { missingMarkers(dir).isEmpty }
-
-  /// Raised when a declaring variable names something that is not this corpus.
-  struct DeclaredCorpusRefused: Error { let message: String }
-
-  /// The variables that DECLARE the corpus root, in the order they are consulted.
-  /// `FUARAN_WIRE_FIXTURES` is the name every corpus reader honours
-  /// first; `FUARAN_CORPUS` is this surface's older spelling, kept.
-  static let declaringVariables = ["FUARAN_WIRE_FIXTURES", "FUARAN_CORPUS"]
-
-  /// A root declared by the operator, if any — REFUSED rather than ignored when wrong.
-  ///
-  /// Falling back would make the override unfalsifiable: a typo'd path would produce a run
-  /// that looks exactly like a working one, and nobody would learn the variable was never
-  /// read. Same posture as the sibling Kotlin surface's `FUARAN_CORPUS` leg.
-  static func declaredCorpus() throws -> URL? {
-    let env = ProcessInfo.processInfo.environment
-    for name in declaringVariables {
-      guard let declared = env[name], !declared.isEmpty else { continue }
-      let url = URL(fileURLWithPath: declared)
-      if isWireCorpus(url) { return url }
-      throw DeclaredCorpusRefused(
-        message: "\(name)='\(declared)' does not name the Fuaran UI wire-format corpus: "
-          + "\(missingMarkers(url)) absent. It is refused rather than ignored — falling back "
-          + "would run this gate against a corpus you did not name.")
-    }
-    return nil
-  }
-
-  /// The repository's MAIN working tree, when this checkout is a git worktree.
-  ///
-  /// `repoRoot` is derived from `#filePath`, so in a worktree at `<workspace>/wt/<n>` the
-  /// corpus is looked for at `<workspace>/wt/wire-format-fixtures`, where it has never been.
-  /// Every conformance test then failed with the cross-host diagnosis — correctly, since the
-  /// corpus genuinely was not where it looked, and uselessly, because the locator was right
-  /// and the checkout was not the one it describes. A shared corpus belongs to the
-  /// REPOSITORY rather than to whichever checkout of it is running, so it is resolved from
-  /// the main working tree: `.git` in a worktree is a FILE whose `gitdir:` line points into
-  /// the primary repository's `.git/worktrees/<name>`, and three levels up from there is the
-  /// primary checkout. Reading that file needs no `git` process and no environment variable,
-  /// which is why a worktree campaign in this repository now needs no configuration at all.
-  static func mainWorktreeRoot() -> URL? {
-    let dotGit = repoRoot.appendingPathComponent(".git")
-    var isDir: ObjCBool = false
-    guard FileManager.default.fileExists(atPath: dotGit.path, isDirectory: &isDir),
-      !isDir.boolValue,
-      let text = try? String(contentsOf: dotGit, encoding: .utf8)
-    else { return nil }  // a plain checkout (.git is a directory) — nothing to redirect to
-    let prefix = "gitdir:"
-    guard
-      let line = text.split(separator: "\n").map({ $0.trimmingCharacters(in: .whitespaces) })
-        .first(where: { $0.hasPrefix(prefix) })
-    else { return nil }
-    let gitDir = URL(
-      fileURLWithPath: String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces))
-    // <primary>/.git/worktrees/<name> → <primary>
-    return
-      gitDir
-      .deletingLastPathComponent()  // worktrees
-      .deletingLastPathComponent()  // .git
-      .deletingLastPathComponent()  // <primary checkout>
-  }
-
-  /// Where the corpus may be, in order. The DECLARED root is deliberately not here: it
-  /// refuses rather than falling through, so `requireCorpus` consults it first and lets the
-  /// refusal propagate. Putting it in this list would make it just another candidate, which
-  /// is the fall-back the refusal exists to prevent.
-  static func corpusCandidates() -> [URL] {
-    var out = [expectedCorpusPath]
-    if let main = mainWorktreeRoot() {
-      out.append(main.deletingLastPathComponent().appendingPathComponent("wire-format-fixtures"))
-    }
-    return out
-  }
-
-  /// Sibling hosts whose presence proves this is a CROSS-HOST checkout — the shape the
-  /// conformance gate is built from — rather than a standalone clone of this repo alone.
-  /// Excludes this host.
-  static let siblingHostNames = [
-    "fuaran-dotnet", "fuaran", "fuaran-ts", "fuaran-py", "fuaran-go", "fuaran-rs", "fuaran-kt",
-  ]
-
-  /// Walks up from the repo looking for a sibling host. A hit means the corpus is absent
-  /// from a checkout that plainly HAS one — it moved, was renamed, or this locator went
-  /// stale — and the right answer is to fail, not to skip.
-  static func crossHostSibling() -> (name: String, under: URL)? {
-    var dir = repoRoot
-    while true {
-      for name in siblingHostNames {
-        var isDir: ObjCBool = false
-        let candidate = dir.appendingPathComponent(name)
-        if FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDir),
-          isDir.boolValue
-        {
-          return (name, dir)
-        }
-      }
-      let parent = dir.deletingLastPathComponent()
-      if parent.path == dir.path { return nil }
-      dir = parent
-    }
-  }
+  static var repoRoot: URL { WireCorpus.repoRoot }
 
   /// The corpus, or the right kind of stop.
   ///
   /// A missing corpus has two very different meanings, and collapsing them into one clean
   /// `XCTSkip` is a vacuous green: on a standalone clone the skip is honest, but on a
   /// cross-host checkout it means the conformance gate silently certified NOTHING while
-  /// reporting success. Discriminate, and FAIL in the second case — naming the path that
-  /// was tried, so the fix is to correct the locator rather than to let the harness keep
-  /// skipping.
+  /// reporting success. Discriminate, and FAIL in the second case.
   static func requireCorpus() throws -> URL {
-    // The declared root FIRST, and its refusal propagates rather than falling through.
-    if let declared = try declaredCorpus() { return declared }
-    if let corpus = corpusDir() { return corpus }
-    if let sibling = crossHostSibling() {
-      let tried = corpusCandidates().map(\.path).joined(separator: ", ")
-      XCTFail(
-        "cross-host checkout detected (\(sibling.name)/ is present under \(sibling.under.path)) "
-          + "but the wire-format-fixtures corpus is at none of [\(tried)] — this gate certified "
-          + "NOTHING. If the corpus moved or was renamed, correct `corpusCandidates()` rather "
-          + "than letting the harness skip; if this is a one-off layout, name it in "
-          + "FUARAN_WIRE_FIXTURES.")
+    switch try WireCorpus.locate() {
+    case .found(let corpus): return corpus
+    case .missingOnCrossHostCheckout(let message):
+      XCTFail(message)
       throw CorpusMissingOnCrossHostCheckout()
+    case .standalone:
+      throw XCTSkip("wire-format-fixtures corpus not found — standalone checkout; skipping.")
     }
-    throw XCTSkip("wire-format-fixtures corpus not found — standalone checkout; skipping.")
   }
 
   struct Fixture {
@@ -658,9 +522,50 @@ final class GeneratedModelTests: XCTestCase {
 
   /// A dialect entry naming a field the IDL no longer has is REFUSED, not carried.
   func testAnEntryNamingAFieldTheIdlNoLongerHasIsRefused() throws {
-    let message = refusal(try perturbed(kind: "Chart", field: "valueFormat"))
-    XCTAssertNotNil(message, "the generator accepted an omission of a field the IDL does not have")
-    XCTAssertTrue(message?.contains("omit|kind Chart.valueFormat") == true, message ?? "")
+    let message = refusal(try perturbed(kind: "Custom", field: "exposedNodeIds"))
+    XCTAssertNotNil(message, "the generator accepted an entry for a field the IDL does not have")
+    XCTAssertTrue(message?.contains("fieldType|kind Custom.exposedNodeIds") == true, message ?? "")
+  }
+
+  /// The IDL with one optional `str` field added to a kind — the next field the
+  /// vocabulary gains.
+  func gained(kind tag: String, field: String) throws -> Data {
+    var root = try XCTUnwrap(
+      try JSONSerialization.jsonObject(with: try idlBytes()) as? [String: Any])
+    var kinds = try XCTUnwrap(root["kinds"] as? [[String: Any]])
+    let k = try XCTUnwrap(kinds.firstIndex { ($0["tag"] as? String) == tag })
+    var fields = try XCTUnwrap(kinds[k]["fields"] as? [[String: Any]])
+    fields.append([
+      "name": field, "optionality": ["$type": "optional"], "type": ["$type": "str"],
+    ])
+    kinds[k]["fields"] = fields
+    root["kinds"] = kinds
+    return try JSONSerialization.data(withJSONObject: root)
+  }
+
+  /// Phase 2331 — a field a kind gains is CARRIED by regeneration: no entry is needed,
+  /// and none can drop it (below).
+  func testAFieldTheIdlGainsIsCarried() throws {
+    let model = try IdlCodegen.generate(idl: try gained(kind: "Chart", field: "probeField"))
+    XCTAssertTrue(
+      model.contains("  public var probeField: String?\n"),
+      "a field the IDL gained on Chart is absent from the regenerated ChartSpec")
+  }
+
+  /// Phase 2331 — an entry dropping a kind's or a record's field is REFUSED: such a
+  /// field is carried, and a render absence is declared in the documentation instead.
+  func testAnEntryDroppingAKindFieldIsRefused() throws {
+    let probe = DialectEntry(subject: .omit("kind Chart.xTitle"), reason: "probe")
+    var message: String? = nil
+    do {
+      _ = try IdlCodegen.generate(idl: try idlBytes(), dialect: dialect + [probe])
+    } catch {
+      message = "\(error)"
+    }
+    XCTAssertNotNil(message, "the generator let a dialect entry drop a kind's field")
+    XCTAssertTrue(
+      message?.contains("kind Chart.xTitle drops a field of a kind or a record") == true,
+      message ?? "")
   }
 
   /// A dialect entry that the rules would now produce on their own is REFUSED.

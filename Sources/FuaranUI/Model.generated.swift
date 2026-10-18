@@ -4,7 +4,7 @@
 // GENERATED from the wire corpus's `idl.json` by `Sources/FuaranUIIdlGen` — do not edit.
 // The rules, and the dialect this surface keeps over them, are in that directory.
 //
-//   idl.json sha256: c0ca90a68de458ae90cc369c5afe6e75cf0a1b36d8383579a0f48073ef8157d8
+//   idl.json sha256: 857888fc68ecc881b6a11e7f141e32f04ba07fd5d21d6ff47ed16538bad2d2d2
 //
 // Regenerate with
 //   FUARAN_IDL_REGENERATE=1 swift test --filter GeneratedModelTests
@@ -16,7 +16,7 @@ import Foundation
 /// The IDL this model was generated from.
 enum GeneratedModel {
   /// The SHA-256 of the `idl.json` bytes.
-  static let idlSha256 = "c0ca90a68de458ae90cc369c5afe6e75cf0a1b36d8383579a0f48073ef8157d8"
+  static let idlSha256 = "857888fc68ecc881b6a11e7f141e32f04ba07fd5d21d6ff47ed16538bad2d2d2"
 }
 
 // ── Bare-string enums: the `rawValue` is the wire spelling ───────────────────
@@ -58,6 +58,11 @@ public enum ChannelDirection: String, CaseIterable, Equatable, Sendable {
   case twoWay = "TwoWay"
 }
 
+public enum ChartDataLabels: String, CaseIterable, Equatable, Sendable {
+  case off = "Off"
+  case ends = "Ends"
+}
+
 public enum ChartKind: String, CaseIterable, Equatable, Sendable {
   case line = "Line"
   case bar = "Bar"
@@ -65,6 +70,18 @@ public enum ChartKind: String, CaseIterable, Equatable, Sendable {
   case pie = "Pie"
   case scatter = "Scatter"
   case heatmap = "Heatmap"
+}
+
+public enum ChartLegendPosition: String, CaseIterable, Equatable, Sendable {
+  case top = "Top"
+  case right = "Right"
+  case bottom = "Bottom"
+  case none = "None"
+}
+
+public enum ChartXScale: String, CaseIterable, Equatable, Sendable {
+  case category = "Category"
+  case temporal = "Temporal"
 }
 
 /// `CompareRule.op` — the cross-field comparison operator.
@@ -775,6 +792,226 @@ public enum TextSource: Equatable, Sendable {
   case i18n(key: String, args: [String: JSON])
 }
 
+// ── Union tag sets: the closed `$type` set of each union ─────────────────────
+// The decoder dispatches on these with an exhaustive `switch`, so a case the IDL
+// gains is a build error there until its arm is written, never a run-time refusal.
+
+/// The closed `$type` set of `Action`.
+enum ActionTag: String, CaseIterable {
+  case chain = "Chain"
+  case writeToClipboard = "WriteToClipboard"
+  case dispatch = "Dispatch"
+  case invoke = "Invoke"
+  case readFileBody = "ReadFileBody"
+  case call = "Call"
+  case navigate = "Navigate"
+  case commitLocal = "CommitLocal"
+  case notify = "Notify"
+  case setState = "SetState"
+  case aiTool = "AiTool"
+  case print = "Print"
+  case confirm = "Confirm"
+  case focus = "Focus"
+}
+
+/// The closed `$type` set of `Binding`.
+enum BindingTag: String, CaseIterable {
+  case staticValue = "Static"
+  case query = "Query"
+  case filter = "Filter"
+  case selection = "Selection"
+  case state = "State"
+  case now = "Now"
+  case computed = "Computed"
+  case local = "Local"
+  case format = "Format"
+  case i18n = "I18n"
+  case transform = "Transform"
+  case expr = "Expr"
+  case invoke = "Invoke"
+}
+
+/// The closed `$type` set of `BoxLayout`.
+enum BoxLayoutTag: String, CaseIterable {
+  case auto = "Auto"
+  case flex = "Flex"
+  case grid = "Grid"
+  case masonry = "Masonry"
+}
+
+/// The closed `$type` set of `CallResultTarget`.
+enum CallResultTargetTag: String, CaseIterable {
+  case state = "State"
+  case query = "Query"
+}
+
+/// The closed `$type` set of `CellFormat`.
+enum CellFormatTag: String, CaseIterable {
+  case none = "None"
+  case number = "Number"
+  case currency = "Currency"
+  case percent = "Percent"
+  case significantDigits = "SignificantDigits"
+  case dateTime = "DateTime"
+  case duration = "Duration"
+  case relativeTime = "RelativeTime"
+  case custom = "Custom"
+}
+
+/// The closed `$type` set of `CellKindErased`.
+enum CellKindErasedTag: String, CaseIterable {
+  case text = "Text"
+  case numeric = "Numeric"
+  case date = "Date"
+  case editable = "Editable"
+  case checkbox = "Checkbox"
+  case button = "Button"
+  case buttonGroup = "ButtonGroup"
+  case link = "Link"
+  case pill = "Pill"
+  case tonedPill = "TonedPill"
+  case progress = "Progress"
+  case custom = "Custom"
+}
+
+/// The closed `$type` set of `ChartAnnotation`.
+enum ChartAnnotationTag: String, CaseIterable {
+  case referenceLine = "ReferenceLine"
+  case eventMarker = "EventMarker"
+  case rangeBand = "RangeBand"
+}
+
+/// The closed `$type` set of `ChartAnnotationRange`.
+enum ChartAnnotationRangeTag: String, CaseIterable {
+  case valueRange = "ValueRange"
+  case xRange = "XRange"
+}
+
+/// The closed `$type` set of `ChartAnnotationX`.
+enum ChartAnnotationXTag: String, CaseIterable {
+  case category = "Category"
+  case date = "Date"
+}
+
+/// The closed `$type` set of `ColumnWidth`.
+enum ColumnWidthTag: String, CaseIterable {
+  case auto = "Auto"
+  case fixed = "Fixed"
+  case flex = "Flex"
+}
+
+/// The closed `$type` set of `CurveCommand`.
+enum CurveCommandTag: String, CaseIterable {
+  case moveTo = "MoveTo"
+  case lineTo = "LineTo"
+  case cubicTo = "CubicTo"
+  case quadraticTo = "QuadraticTo"
+  case close = "Close"
+}
+
+/// The closed `$type` set of `FormFieldKind`.
+enum FormFieldKindTag: String, CaseIterable {
+  case text = "Text"
+  case number = "Number"
+  case checkbox = "Checkbox"
+  case toggle = "Toggle"
+  case choice = "Choice"
+  case textArea = "TextArea"
+  case rangedNumber = "RangedNumber"
+  case range = "Range"
+  case segmentedChoice = "SegmentedChoice"
+  case dateTime = "DateTime"
+  case dateTimeRange = "DateTimeRange"
+  case combobox = "Combobox"
+  case rating = "Rating"
+  case color = "Color"
+  case tokens = "Tokens"
+}
+
+/// The closed `$type` set of `Format`.
+enum FormatTag: String, CaseIterable {
+  case number = "Number"
+  case currency = "Currency"
+  case percent = "Percent"
+  case dateTime = "DateTime"
+  case relativeTime = "RelativeTime"
+  case duration = "Duration"
+  case since = "Since"
+}
+
+/// The closed `$type` set of `FragmentArg`.
+enum FragmentArgTag: String, CaseIterable {
+  case int = "Int"
+  case float = "Float"
+  case bool = "Bool"
+  case str = "Str"
+  case slotArg = "SlotArg"
+}
+
+/// The closed `$type` set of `HoleDecl`.
+enum HoleDeclTag: String, CaseIterable {
+  case value = "Value"
+  case slot = "Slot"
+  case repeatHole = "Repeat"
+}
+
+/// The closed `$type` set of `HoleValueSpace`.
+enum HoleValueSpaceTag: String, CaseIterable {
+  case intRange = "IntRange"
+  case floatRange = "FloatRange"
+  case stringLen = "StringLen"
+  case enumChoices = "Enum"
+  case anyString = "AnyString"
+}
+
+/// The closed `$type` set of `LocalFlushTrigger`.
+enum LocalFlushTriggerTag: String, CaseIterable {
+  case onBlur = "OnBlur"
+  case onSubmit = "OnSubmit"
+  case onDebounce = "OnDebounce"
+  case onCommitAction = "OnCommitAction"
+}
+
+/// The closed `$type` set of `LocaleSource`.
+enum LocaleSourceTag: String, CaseIterable {
+  case ambient = "Ambient"
+  case explicit = "Explicit"
+}
+
+/// The closed `$type` set of `MediaKind`.
+enum MediaKindTag: String, CaseIterable {
+  case video = "Video"
+  case audio = "Audio"
+}
+
+/// The closed `$type` set of `Scalar`.
+enum FragmentScalarTag: String, CaseIterable {
+  case int = "Int"
+  case float = "Float"
+  case bool = "Bool"
+  case str = "Str"
+}
+
+/// The closed `$type` set of `Shape`.
+enum ShapeTag: String, CaseIterable {
+  case group = "Group"
+  case rectangle = "Rectangle"
+  case line = "Line"
+  case polyline = "Polyline"
+  case polygon = "Polygon"
+  case curve = "Curve"
+  case circle = "Circle"
+  case ellipse = "Ellipse"
+  case label = "Label"
+}
+
+/// The closed `$type` set of `TextSource`.
+enum TextSourceTag: String, CaseIterable {
+  case literal = "Literal"
+  case bound = "Bound"
+  case i18n = "I18n"
+}
+
 // ── Records ──────────────────────────────────────────────────────────────────
 
 public struct Accessibility: Equatable, Sendable {
@@ -806,6 +1043,8 @@ public struct Accessibility: Equatable, Sendable {
 
 public struct ColumnErased: Equatable, Sendable {
   public var field: String?
+  public var sortable: Bool?
+  public var editable: Bool?
   public var format: CellFormat = .none
   public var kind: CellKindErased
   public var label: String
@@ -1143,6 +1382,13 @@ public struct ChartSpec: Equatable, Sendable {
   public var xField: String
   public var yFields: [String]
   public var title: TextSource?
+  public var valueFormat: Format?
+  public var xTitle: TextSource?
+  public var yTitle: TextSource?
+  public var subtitle: TextSource?
+  public var legendPosition: ChartLegendPosition?
+  public var dataLabels: ChartDataLabels?
+  public var xScale: ChartXScale?
   /// Phase 1490 — omitted when the chart declares none.
   public var annotations: [ChartAnnotation]?
   public var onPointClick: Closure?
@@ -1180,6 +1426,7 @@ public struct GridSpec: Equatable, Sendable {
   public var pageStateKey: String?
   public var defaultSort: DefaultSort?
   public var editStateKey: String?
+  public var reorderable: Bool = false
   /// Phase 1125 — the two sides of ONE shared State key. A grid declaring
   /// `transferOutKey` K may RELEASE rows onto K; one declaring `transferInKey`
   /// K ACCEPTS rows arriving on it. Separate decoder arms, and the corpus
@@ -1192,6 +1439,8 @@ public struct GridSpec: Equatable, Sendable {
   /// Phase 1123 — this grid's rows may be taken out of the page as a file.
   /// Omitted at `false`.
   public var exportable: Bool = false
+  public var windowStateKey: String?
+  public var rowTotal: Binding?
   public var source: Binding
   public var staticRows: StaticRows?
   public var onRowClick: Closure?
@@ -1294,6 +1543,7 @@ public struct FileUploadSpec: Equatable, Sendable {
   public var accept: [String]
   public var label: TextSource
   public var multiple: Bool
+  public var onSelect: Closure?
   public var disabled: Binding?
   public var acceptPaste: Bool = false
   /// Phase 1115 — two ADDITIONAL ingress routes, never replacements for the
@@ -1540,12 +1790,14 @@ public struct ModalSpec: Equatable, Sendable {
   /// because a document asking for a popover and getting a blocking modal has
   /// been answered with a different affordance.
   public var modality: ModalityKind = .modal
+  public var anchor: String?
 }
 
 public struct MountSpec: Equatable, Sendable {
   public var capabilities: [String]
   public var channel: MountChannel
   public var inputs: [FragmentArgEntry]
+  public var onBubble: Closure?
   public var scopeId: String
 }
 
@@ -1592,6 +1844,7 @@ public struct SplitPanelSpec: Equatable, Sendable {
 public struct StepperSpec: Equatable, Sendable {
   public var activeStep: Binding
   public var children: [Node]
+  public var onSelect: Closure?
 }
 
 public struct SummaryListSpec: Equatable, Sendable {

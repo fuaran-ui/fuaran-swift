@@ -187,17 +187,15 @@ extension Decode {
   /// rather than a re-meaning of shipped bytes.
   static func mediaKind(_ path: String, _ j: JSON) throws -> MediaKind {
     let f = try object(path, j)
-    switch try disc(path, f) {
-    case "Video":
+    switch try unionTag(path, try disc(path, f), MediaKindTag.self) {
+    case .video:
       return .video(
         autoplay: try optBool(path, f, "autoplay") ?? false,
         poster: try optBindingSlot(path, f, "poster", .str))
     // No slot is read here, and that is the point: `Audio` declares none, so
     // an `"autoplay":true` riding an Audio payload has nowhere to land.
-    case "Audio":
+    case .audio:
       return .audio
-    case let other:
-      throw unknownEnumCase("\(path).$type", other, "MediaKind: Video | Audio")
     }
   }
 
@@ -495,59 +493,55 @@ extension Decode {
 
   static func curveCommand(_ path: String, _ j: JSON) throws -> CurveCommand {
     let f = try object(path, j)
-    switch try disc(path, f) {
-    case "MoveTo": return .moveTo(try reqPoint(path, f, "to"))
-    case "LineTo": return .lineTo(try reqPoint(path, f, "to"))
-    case "CubicTo":
+    switch try unionTag(path, try disc(path, f), CurveCommandTag.self) {
+    case .moveTo: return .moveTo(try reqPoint(path, f, "to"))
+    case .lineTo: return .lineTo(try reqPoint(path, f, "to"))
+    case .cubicTo:
       return .cubicTo(
         control1: try reqPoint(path, f, "control1"),
         control2: try reqPoint(path, f, "control2"), to: try reqPoint(path, f, "to"))
-    case "QuadraticTo":
+    case .quadraticTo:
       return .quadraticTo(
         control: try reqPoint(path, f, "control"), to: try reqPoint(path, f, "to"))
-    case "Close": return .close
-    case let o: throw unknownCase(path, o, "MoveTo | LineTo | CubicTo | QuadraticTo | Close")
+    case .close: return .close
     }
   }
 
   static func shape(_ path: String, _ j: JSON) throws -> Shape {
     let f = try object(path, j)
     let style = try styleOrDefault(path, f)
-    switch try disc(path, f) {
-    case "Group":
+    switch try unionTag(path, try disc(path, f), ShapeTag.self) {
+    case .group:
       let children = try array("\(path).children", try req(path, f, "children")).enumerated()
         .map { try shape("\(path).children[\($0.0)]", $0.1) }
       return .group(children: children, style: style)
-    case "Rectangle":
+    case .rectangle:
       return .rectangle(
         x: try reqFloat(path, f, "x"), y: try reqFloat(path, f, "y"),
         width: try reqFloat(path, f, "width"), height: try reqFloat(path, f, "height"),
         cornerRadius: try optFloat(path, f, "cornerRadius"), style: style)
-    case "Line":
+    case .line:
       return .line(
         x1: try reqFloat(path, f, "x1"), y1: try reqFloat(path, f, "y1"),
         x2: try reqFloat(path, f, "x2"), y2: try reqFloat(path, f, "y2"), style: style)
-    case "Polyline": return .polyline(points: try pointList(path, f), style: style)
-    case "Polygon": return .polygon(points: try pointList(path, f), style: style)
-    case "Curve":
+    case .polyline: return .polyline(points: try pointList(path, f), style: style)
+    case .polygon: return .polygon(points: try pointList(path, f), style: style)
+    case .curve:
       let commands = try array("\(path).commands", try req(path, f, "commands")).enumerated()
         .map { try curveCommand("\(path).commands[\($0.0)]", $0.1) }
       return .curve(commands: commands, style: style)
-    case "Circle":
+    case .circle:
       return .circle(
         cx: try reqFloat(path, f, "cx"), cy: try reqFloat(path, f, "cy"),
         r: try reqFloat(path, f, "r"), style: style)
-    case "Ellipse":
+    case .ellipse:
       return .ellipse(
         cx: try reqFloat(path, f, "cx"), cy: try reqFloat(path, f, "cy"),
         rx: try reqFloat(path, f, "rx"), ry: try reqFloat(path, f, "ry"), style: style)
-    case "Label":
+    case .label:
       return .label(
         x: try reqFloat(path, f, "x"), y: try reqFloat(path, f, "y"),
         text: try reqTextSource(path, f, "text"), style: style)
-    case let o:
-      throw unknownCase(
-        path, o, "Group | Rectangle | Line | Polyline | Polygon | Curve | Circle | Ellipse | Label")
     }
   }
 
@@ -648,19 +642,25 @@ extension Decode {
       return try bindingSlot("\(path).value", v, slot)
     }
     let tag = try disc(path, f)
-    switch tag {
-    case "Text":
+    // §16 (Phase 1811): `Date` and `Time` read as `DateTime`, `DateRange` and
+    // `TimeRange` as `DateTimeRange`; `temporalVariant` reads the raw tag.
+    let temporalAliases: [String: FormFieldKindTag] = [
+      "Date": .dateTime, "DateRange": .dateTimeRange, "Time": .dateTime,
+      "TimeRange": .dateTimeRange,
+    ]
+    switch try unionTag(path, tag, FormFieldKindTag.self, aliases: temporalAliases) {
+    case .text:
       return .text(value: try valueOr(.str, ControlValueDefaults.text), onChange: onChange)
-    case "Number":
+    case .number:
       return .number(value: try valueOr(.float, ControlValueDefaults.number), onChange: onChange)
-    case "Checkbox":
+    case .checkbox:
       return .checkbox(
         value: try valueOr(.bool, ControlValueDefaults.checkbox), onToggle: onChange)
     // The switch affordance beside a Checkbox: the same boolean slot, a different control.
-    case "Toggle":
+    case .toggle:
       return .toggle(
         value: try valueOr(.bool, ControlValueDefaults.checkbox), onToggle: onChange)
-    case "Choice":
+    case .choice:
       return .choice(
         options: try reqBindingSlot(path, f, "options", .options),
         value: try valueOr(.stringOpt, ControlValueDefaults.choice), onChange: onChange)
@@ -668,7 +668,7 @@ extension Decode {
     // contract is `Choice`'s BY THE SPECIFICATION rather than by convenience:
     // `valueOr(.stringOpt, …)` is the same call one arm up, so a document
     // migrating between the two changes its `$type` and nothing else.
-    case "Combobox":
+    case .combobox:
       return .combobox(
         // The case's ONLY required member — a combobox with no option source is
         // not a control. A `Query` binding here IS the async suggestion feed;
@@ -685,7 +685,7 @@ extension Decode {
     // 0.2.0 — the dual-thumb numeric range (absorbed the retired RangeFilter).
     // The canonical Static pair rides as the BARE `{min, max}` object (no
     // `$type`) — accept it before the generic binding dispatch.
-    case "Range":
+    case .range:
       let value: Binding
       if case .object(let pf)? = f["value"], pf["$type"] == nil, pf["min"] != nil,
         pf["max"] != nil
@@ -697,13 +697,13 @@ extension Decode {
       return .range(
         value: value, min: try optFloat(path, f, "min"), max: try optFloat(path, f, "max"),
         step: try optFloat(path, f, "step"), onChange: onChange)
-    case "RangedNumber":
+    case .rangedNumber:
       return .rangedNumber(
         value: try valueOr(.float, ControlValueDefaults.number),
         min: try optFloat(path, f, "min"),
         max: try optFloat(path, f, "max"), step: try optFloat(path, f, "step"),
         onChange: onChange)
-    case "SegmentedChoice":
+    case .segmentedChoice:
       // Lenient omitted-when-default (§3.6): absent restores the language
       // default `Horizontal` (decode-optional).
       let orient: Orientation
@@ -716,7 +716,7 @@ extension Decode {
         options: try reqBindingSlot(path, f, "options", .options),
         orientation: orient,
         value: try valueOr(.stringOpt, ControlValueDefaults.choice), onChange: onChange)
-    case "TextArea":
+    case .textArea:
       return .textArea(
         rows: try reqInt(path, f, "rows"),
         value: try valueOr(.str, ControlValueDefaults.text),
@@ -726,7 +726,7 @@ extension Decode {
     // invented spelling the rename exists to make findable — a
     // `DateTime{variant:"Time"}` reached for by intent, so the alias SUPPLIES the
     // variant when absent and REFUSES a disagreeing one beside it.
-    case "DateTime", "Date", "Time":
+    case .dateTime:
       return .dateTime(
         value: try valueOr(.str, ControlValueDefaults.dateTime),
         variant: try temporalVariant(path, f, tag, "Time"),
@@ -735,7 +735,7 @@ extension Decode {
     // Phase 1811 — `DateTimeRange` is canonical; `DateRange` (pre-rename) and
     // `TimeRange` (invented, fixes `variant` to `Time`) are its §16 lenient aliases
     // on exactly the `DateTime` rule above.
-    case "DateTimeRange", "DateRange", "TimeRange":
+    case .dateTimeRange:
       // The canonical Static pair rides as the BARE `{from, to}` object (no
       // `$type`) — accept it before the generic binding dispatch, exactly as
       // `Range` does above. The `valueOr` fallback carries both lenient forms
@@ -759,7 +759,7 @@ extension Decode {
     // refused at `allowFreeText` rather than at `suggestions`, because the
     // member that was WRITTEN is the one naming the impossible state — an
     // absent `suggestions` is the ordinary open token box.
-    case "Tokens":
+    case .tokens:
       let suggestions = try optBindingSlot(path, f, "suggestions", .options)
       let allowFreeText = try optBool(path, f, "allowFreeText") ?? true
       if !allowFreeText && suggestions == nil {
@@ -776,7 +776,7 @@ extension Decode {
     // SCALE is refused here and the VALUE is not, because a bound value is
     // invisible to a decoder and a rule enforced only on literals would be two
     // rules wearing one name.
-    case "Rating":
+    case .rating:
       let scale = try reqInt(path, f, "max")
       if scale < 1 {
         throw wrongType(
@@ -792,7 +792,7 @@ extension Decode {
     // Phase 1130 — only the STATIC case is judged here, and the split is
     // recorded rather than hidden: a state / query / selection binding carries
     // its text from outside the document, where a decoder cannot see it.
-    case "Color":
+    case .color:
       let value = try valueOr(.str, ControlValueDefaults.color)
       if case .staticValue(.ast(.string(let literal))) = value, !isHexColour(literal) {
         throw wrongType(
@@ -801,12 +801,6 @@ extension Decode {
             + "outside it names a colour this control could never carry")
       }
       return .color(value: value, onChange: onChange)
-    case let o:
-      throw unknownCase(
-        path, o,
-        "Text | Number | Checkbox | Choice | Combobox | Range | RangedNumber | SegmentedChoice "
-          + "| TextArea | DateTime | DateTimeRange | Tokens | Rating | Color"
-      )
     }
   }
 
@@ -1001,6 +995,7 @@ extension Decode {
       accept: accept,
       label: labelV,
       multiple: multipleV,
+      onSelect: optClosure(f, "onSelect"),
       disabled: disabledV,
       acceptPaste: acceptPasteV,
       dropTarget: dropTargetV,
@@ -1085,38 +1080,33 @@ extension Decode {
 
   static func cellKindErased(_ path: String, _ j: JSON) throws -> CellKindErased {
     let f = try object(path, j)
-    switch try disc(path, f) {
+    switch try unionTag(path, try disc(path, f), CellKindErasedTag.self) {
     // Lenient-ingest (WIRE_FORMAT.md §16, Phase 750): "pill" is the WORD for the
     // thing, so a declarative tone rule arrives tagged `Pill` more often than tagged
     // `TonedPill`. Before this phase those keys were accepted and DISCARDED — the
     // author's whole intent gone, silently, with no error to notice. Presence of a
     // tone map is the unambiguous tell: a closure `Pill` carries only
     // `labelFn`/`toneFn` and can never carry one.
-    case "Pill" where toneMapKeys.contains(where: { f[$0] != nil }):
+    case .pill where toneMapKeys.contains(where: { f[$0] != nil }):
       return try tonedPill(path, f)
-    case "TonedPill": return try tonedPill(path, f)
-    case "Text": return .text
-    case "Numeric": return .numeric
-    case "Date": return .date
-    case "Editable": return .editable
-    case "Checkbox": return .checkbox
-    case "Button": return .button(label: try reqTextSource(path, f, "label"))
-    case "ButtonGroup":
+    case .tonedPill: return try tonedPill(path, f)
+    case .text: return .text
+    case .numeric: return .numeric
+    case .date: return .date
+    case .editable: return .editable
+    case .checkbox: return .checkbox
+    case .button: return .button(label: try reqTextSource(path, f, "label"))
+    case .buttonGroup:
       let labels = try array("\(path).buttons", try req(path, f, "buttons")).enumerated()
         .map { (i, item) -> TextSource in
           let bf = try object("\(path).buttons[\(i)]", item)
           return try reqTextSource("\(path).buttons[\(i)]", bf, "label")
         }
       return .buttonGroup(labels: labels)
-    case "Link": return .link
-    case "Pill": return .pill
-    case "Progress": return .progress
-    case "Custom": return .custom
-    case let o:
-      throw unknownCase(
-        path, o,
-        "Text | Numeric | Date | Editable | Checkbox | Button | ButtonGroup | Link | Pill | TonedPill | Progress | Custom"
-      )
+    case .link: return .link
+    case .pill: return .pill
+    case .progress: return .progress
+    case .custom: return .custom
     }
   }
 
@@ -1131,8 +1121,14 @@ extension Decode {
     let labelV = try reqStringAliased(path, f, "label", ["header", "title"])
     let widthV = try optColumnWidthDefault(path, f, "width")
     let fieldV = try optString(path, f, "field")
+    // Phase 2331 — the per-column narrowings of the grid's sort and edit
+    // declarations. Absent defers to the grid, so they stay optional.
+    let sortableV = try optBool(path, f, "sortable")
+    let editableV = try optBool(path, f, "editable")
     return ColumnErased(
       field: fieldV,
+      sortable: sortableV,
+      editable: editableV,
       format: formatV,
       kind: kindV,
       label: labelV,
@@ -1255,6 +1251,13 @@ extension Decode {
     // reported at its own path.
     let transferInKeyV = try optString(path, f, "transferInKey")
     let transferOutKeyV = try optString(path, f, "transferOutKey")
+    // Phase 2331 — row reordering (a bool omitted at `false`, read strictly like
+    // the other affordance slots) and the grid window protocol's two members:
+    // the State slot naming the window, and the declared total row count. All
+    // carried; docs/RENDER-PROJECTION.md lists what the grid arm does not act on.
+    let reorderableV = try optBool(path, f, "reorderable") ?? false
+    let windowStateKeyV = try optString(path, f, "windowStateKey")
+    let rowTotalV = try optBindingSlot(path, f, "rowTotal", .int)
     return GridSpec(
       columns: columns,
       editable: editableV,
@@ -1265,11 +1268,14 @@ extension Decode {
       pageStateKey: pageStateKeyV,
       defaultSort: gridSortV,
       editStateKey: editStateKeyV,
+      reorderable: reorderableV,
       transferInKey: transferInKeyV,
       transferOutKey: transferOutKeyV,
       keepRowsTogether: keepRowsTogetherV,
       repeatHeader: repeatHeaderV,
       exportable: exportableV,
+      windowStateKey: windowStateKeyV,
+      rowTotal: rowTotalV,
       source: sourceV,
       staticRows: staticRowsV,
       onRowClick: optClosure(f, "onRowClick"))
@@ -1310,9 +1316,9 @@ extension Decode {
   /// Phase 1491 (§4l) — an annotation's x address.
   static func chartAnnotationX(_ path: String, _ j: JSON) throws -> ChartAnnotationX {
     let f = try object(path, j)
-    switch try disc(path, f) {
-    case "Category": return .category(key: try reqString(path, f, "key"))
-    case "Date":
+    switch try unionTag(path, try disc(path, f), ChartAnnotationXTag.self) {
+    case .category: return .category(key: try reqString(path, f, "key"))
+    case .date:
       let iso = try reqString(path, f, "iso")
       guard isCanonicalIsoDay(iso) else {
         throw wrongType(
@@ -1322,7 +1328,6 @@ extension Decode {
             + "unreadable one would place the marker at 1970-01-01 and drag the axis back with it")
       }
       return .date(iso: iso)
-    case let o: throw unknownCase(path, o, "Category, Date")
     }
   }
 
@@ -1342,8 +1347,8 @@ extension Decode {
   /// address.
   static func chartAnnotationRange(_ path: String, _ j: JSON) throws -> ChartAnnotationRange {
     let f = try object(path, j)
-    switch try disc(path, f) {
-    case "ValueRange":
+    switch try unionTag(path, try disc(path, f), ChartAnnotationRangeTag.self) {
+    case .valueRange:
       let from = try reqFloat(path, f, "from")
       let to = try reqFloat(path, f, "to")
       for (slot, v) in [("from", from), ("to", to)] where !v.isFinite {
@@ -1360,7 +1365,7 @@ extension Decode {
             + "not describe")
       }
       return .valueRange(from: from, to: to)
-    case "XRange":
+    case .xRange:
       let from = try chartAnnotationX("\(path).from", try req(path, f, "from"))
       let to = try chartAnnotationX("\(path).to", try req(path, f, "to"))
       // Both dates are already known canonical and calendar-valid (the address
@@ -1375,7 +1380,6 @@ extension Decode {
             + "not describe")
       }
       return .xRange(from: from, to: to)
-    case let o: throw unknownCase(path, o, "ValueRange, XRange")
     }
   }
 
@@ -1392,8 +1396,8 @@ extension Decode {
   static func chartAnnotation(_ path: String, _ j: JSON) throws -> ChartAnnotation {
     let f = try object(path, j)
     let label = try optTextSource(path, f, "label")
-    switch try disc(path, f) {
-    case "ReferenceLine":
+    switch try unionTag(path, try disc(path, f), ChartAnnotationTag.self) {
+    case .referenceLine:
       let value = try reqFloat(path, f, "value")
       guard value.isFinite else {
         throw wrongType(
@@ -1402,13 +1406,12 @@ extension Decode {
             + "Infinity names none; give the value in the axis's own units, or drop the annotation")
       }
       return .referenceLine(value: value, label: label)
-    case "EventMarker":
+    case .eventMarker:
       return .eventMarker(
         at: try chartAnnotationX("\(path).at", try req(path, f, "at")), label: label)
-    case "RangeBand":
+    case .rangeBand:
       return .rangeBand(
         range: try chartAnnotationRange("\(path).range", try req(path, f, "range")), label: label)
-    case let o: throw unknownCase(path, o, "ReferenceLine, EventMarker, RangeBand")
     }
   }
 
@@ -1429,6 +1432,21 @@ extension Decode {
       xField: try reqString(path, f, "xField"),
       yFields: yFields,
       title: try optTextSource(path, f, "title"),
+      // Phase 2331 — the axis format, the axis names, the subtitle, the legend's
+      // placement, the data labels and the x scale. Each is optional and absent is
+      // the ordinary shape; this surface carries them, and what its chart arm
+      // does not yet paint is listed in docs/RENDER-PROJECTION.md.
+      valueFormat: try f["valueFormat"].map { try format("\(path).valueFormat", $0) },
+      xTitle: try optTextSource(path, f, "xTitle"),
+      yTitle: try optTextSource(path, f, "yTitle"),
+      subtitle: try optTextSource(path, f, "subtitle"),
+      legendPosition: try f["legendPosition"].map {
+        try bareEnum("\(path).legendPosition", $0, "ChartLegendPosition")
+      },
+      dataLabels: try f["dataLabels"].map {
+        try bareEnum("\(path).dataLabels", $0, "ChartDataLabels")
+      },
+      xScale: try f["xScale"].map { try bareEnum("\(path).xScale", $0, "ChartXScale") },
       annotations: annotationsV,
       onPointClick: optClosure(f, "onPointClick"))
   }
@@ -1453,12 +1471,12 @@ extension Decode {
 
   static func boxLayout(_ path: String, _ j: JSON) throws -> BoxLayout {
     let f = try object(path, j)
-    switch try disc(path, f) {
-    case "Flex":
+    switch try unionTag(path, try disc(path, f), BoxLayoutTag.self) {
+    case .flex:
       return .flex(
         direction: try orientation("\(path).direction", try req(path, f, "direction")),
         gap: try optInt(path, f, "gap"), wrap: try reqBool(path, f, "wrap"))
-    case "Grid":
+    case .grid:
       // Field alias: columns → cols. Lenient (§3.6): absent `cols` with no
       // `templateColumns` reads as `Auto`; absent `cols` WITH a template reads
       // `cols: 1` (the template carries the real shape).
@@ -1469,7 +1487,7 @@ extension Decode {
       if let v = colsJ { cols = try int("\(path).cols", v) } else { cols = 1 }
       return .grid(
         cols: cols, gap: try optInt(path, f, "gap"), templateColumns: templateColumns)
-    case "Masonry":
+    case .masonry:
       // WIRE_FORMAT §3.6.7 — column-fill. `cols` is REQUIRED and POSITIVE, on
       // the §3.6.4 srcSet width-floor pattern: `column-count: 0` is invalid
       // CSS, so a container declaring it would fall back to whatever the host
@@ -1490,8 +1508,7 @@ extension Decode {
           "\(path).cols", "JSON number (positive integer column count)")
       }
       return .masonry(cols: masonryCols, gap: try optInt(path, f, "gap"))
-    case "Auto": return .auto
-    case let o: throw unknownCase(path, o, "Flex | Grid | Masonry | Auto")
+    case .auto: return .auto
     }
   }
 
@@ -1609,7 +1626,8 @@ extension Decode {
     let f = try object(path, j)
     return StepperSpec(
       activeStep: try reqBindingSlot(path, f, "activeStep", .int),
-      children: try children(path, f, walk))
+      children: try children(path, f, walk),
+      onSelect: optClosure(f, "onSelect"))
   }
 
   static func summaryListSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> SummaryListSpec {
@@ -1652,7 +1670,10 @@ extension Decode {
       // been answered with a different affordance.
       modality: try f["modality"].map {
         try bareEnum("\(path).modality", $0, "ModalityKind")
-      } ?? .modal)
+      } ?? .modal,
+      // Phase 2331 — the id of the node a popover attaches to; carried, not
+      // resolved (docs/RENDER-PROJECTION.md lists the render absence).
+      anchor: try optString(path, f, "anchor"))
   }
 
   static func scrollAreaSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> ScrollAreaSpec {
@@ -1681,54 +1702,50 @@ extension Decode {
 
   static func holeValueSpace(_ path: String, _ j: JSON) throws -> HoleValueSpace {
     let f = try object(path, j)
-    switch try disc(path, f) {
-    case "IntRange":
+    switch try unionTag(path, try disc(path, f), HoleValueSpaceTag.self) {
+    case .intRange:
       return .intRange(min: try reqInt(path, f, "min"), max: try reqInt(path, f, "max"))
-    case "FloatRange":
+    case .floatRange:
       return .floatRange(min: try reqFloat(path, f, "min"), max: try reqFloat(path, f, "max"))
-    case "StringLen":
+    case .stringLen:
       return .stringLen(
         minLen: try reqInt(path, f, "minLen"), maxLen: try reqInt(path, f, "maxLen"))
-    case "Enum":
+    case .enumChoices:
       let choices = try array("\(path).choices", try req(path, f, "choices")).enumerated()
         .map { try string("\(path).choices[\($0.0)]", $0.1) }
       return .enumChoices(choices: choices)
-    case "AnyString": return .anyString
-    case let o:
-      throw unknownCase(path, o, "IntRange | FloatRange | StringLen | Enum | AnyString")
+    case .anyString: return .anyString
     }
   }
 
   static func fragmentScalar(_ path: String, _ j: JSON) throws -> FragmentScalar {
     let f = try object(path, j)
-    switch try disc(path, f) {
-    case "Int": return .int(try reqInt(path, f, "value"))
-    case "Float": return .float(try reqFloat(path, f, "value"))
-    case "Bool": return .bool(try reqBool(path, f, "value"))
-    case "Str": return .str(try reqString(path, f, "value"))
-    case let o: throw unknownCase(path, o, "Int | Float | Bool | Str")
+    switch try unionTag(path, try disc(path, f), FragmentScalarTag.self) {
+    case .int: return .int(try reqInt(path, f, "value"))
+    case .float: return .float(try reqFloat(path, f, "value"))
+    case .bool: return .bool(try reqBool(path, f, "value"))
+    case .str: return .str(try reqString(path, f, "value"))
     }
   }
 
   static func holeDecl(_ path: String, _ j: JSON) throws -> HoleDecl {
     let f = try object(path, j)
-    switch try disc(path, f) {
-    case "Value":
+    switch try unionTag(path, try disc(path, f), HoleDeclTag.self) {
+    case .value:
       var def: FragmentScalar? = nil
       if let v = f["default"] { def = try fragmentScalar("\(path).default", v) }
       return .value(
         name: try reqString(path, f, "name"),
         space: try holeValueSpace("\(path).space", try req(path, f, "space")),
         default: def)
-    case "Slot":
+    case .slot:
       return .slot(
         name: try reqString(path, f, "name"),
         kindConstraint: try optString(path, f, "kindConstraint"))
-    case "Repeat":
+    case .repeatHole:
       return .repeatHole(
         name: try reqString(path, f, "name"),
         countSpace: try holeValueSpace("\(path).countSpace", try req(path, f, "countSpace")))
-    case let o: throw unknownCase(path, o, "Value | Slot | Repeat")
     }
   }
 
@@ -1748,10 +1765,12 @@ extension Decode {
 
   static func fragmentArg(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> FragmentArg {
     let f = try object(path, j)
-    if try disc(path, f) == "SlotArg" {
-      return .slot(tree: try node("\(path).tree", try req(path, f, "tree"), walk))
+    // The hand-written model folds the four scalar cases into `value`; the
+    // dispatch is still over the IDL's whole case set.
+    switch try unionTag(path, try disc(path, f), FragmentArgTag.self) {
+    case .slotArg: return .slot(tree: try node("\(path).tree", try req(path, f, "tree"), walk))
+    case .int, .float, .bool, .str: return .value(try fragmentScalar(path, j))
     }
-    return .value(try fragmentScalar(path, j))
   }
 
   static func fragmentArgs(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> [FragmentArgEntry] {
@@ -1957,6 +1976,7 @@ extension Decode {
           capabilities: caps,
           channel: channelV,
           inputs: inputs,
+          onBubble: optClosure(f, "onBubble"),
           scopeId: scopeIdV))
     }
   }

@@ -27,21 +27,6 @@ import XCTest
 
   @MainActor
   final class RenderCoverageTests: XCTestCase {
-    /// Locate the shared corpus relative to this source file:
-    /// `<repo>/Tests/FuaranUIRendererTests/…` → `<repo>/../wire-format-fixtures`.
-    static func corpusDir() -> URL? {
-      let here = URL(fileURLWithPath: #filePath)
-      let repoRoot =
-        here
-        .deletingLastPathComponent()  // FuaranUIRendererTests
-        .deletingLastPathComponent()  // Tests
-        .deletingLastPathComponent()  // fuaran-swift
-      let corpus = repoRoot.deletingLastPathComponent().appendingPathComponent("wire-format-fixtures")
-      var isDir: ObjCBool = false
-      let exists = FileManager.default.fileExists(atPath: corpus.path, isDirectory: &isDir)
-      return exists && isDir.boolValue ? corpus : nil
-    }
-
     struct Fixture {
       let id: String
       let kind: String
@@ -82,9 +67,7 @@ import XCTest
     }
 
     func testEveryNodeFixtureRendersThroughTheFloorWithZeroFallbacks() throws {
-      guard let corpus = Self.corpusDir() else {
-        throw XCTSkip("wire-format-fixtures corpus not found — standalone checkout; skipping.")
-      }
+      let corpus = try RendererCorpus.require()
       let fixtures = try Self.loadFixtures(corpus).filter {
         $0.decoder == "node" && ($0.kind == "node-round-trip" || $0.kind == "lenient-accept")
       }
@@ -133,9 +116,7 @@ import XCTest
     /// The node-round-trip family alone must exercise a broad slice of the flat
     /// vocabulary — a guard that the harness is really walking the corpus.
     func testNodeRoundTripFamilyCoversManyKinds() throws {
-      guard let corpus = Self.corpusDir() else {
-        throw XCTSkip("wire-format-fixtures corpus not found — skipping.")
-      }
+      let corpus = try RendererCorpus.require()
       let fixtures = try Self.loadFixtures(corpus).filter { $0.decoder == "node" && $0.kind == "node-round-trip" }
       let coverage = RenderCoverage()
       for fx in fixtures {

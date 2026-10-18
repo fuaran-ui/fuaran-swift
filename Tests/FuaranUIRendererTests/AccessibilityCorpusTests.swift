@@ -25,22 +25,8 @@ import XCTest
 @testable import FuaranUIRenderer
 
 final class AccessibilityCorpusTests: XCTestCase {
-  /// `<repo>/Tests/FuaranUIRendererTests/…` → `<repo>/../wire-format-fixtures/nodes`.
-  private static var nodesDir: URL {
-    URL(fileURLWithPath: #filePath)
-      .deletingLastPathComponent()  // FuaranUIRendererTests
-      .deletingLastPathComponent()  // Tests
-      .deletingLastPathComponent()  // fuaran-swift
-      .deletingLastPathComponent()  // the workspace tree
-      .appendingPathComponent("wire-format-fixtures")
-      .appendingPathComponent("nodes")
-  }
-
   private func fixture(_ id: String) throws -> Node {
-    let url = Self.nodesDir.appendingPathComponent("\(id).json")
-    guard FileManager.default.fileExists(atPath: url.path) else {
-      throw XCTSkip("wire-format-fixtures corpus not found — standalone checkout; skipping.")
-    }
+    let url = try RendererCorpus.nodes().appendingPathComponent("\(id).json")
     return try RenderProjection.decodeNode(String(contentsOf: url, encoding: .utf8))
   }
 

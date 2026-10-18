@@ -246,9 +246,7 @@ import XCTest
     // ── The arm itself builds, for every shape in the corpus fixtures ────────
 
     private func drawingFixture(_ relativePath: String) throws -> DrawingSpec {
-      guard let corpus = RenderCoverageTests.corpusDir() else {
-        throw XCTSkip("wire-format-fixtures corpus not found — standalone checkout; skipping.")
-      }
+      let corpus = try RendererCorpus.require()
       let url = corpus.appendingPathComponent(relativePath)
       guard FileManager.default.fileExists(atPath: url.path) else {
         throw XCTSkip("corpus fixture \(relativePath) not present in this corpus revision.")

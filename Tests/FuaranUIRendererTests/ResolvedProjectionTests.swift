@@ -26,24 +26,9 @@ import XCTest
   @testable import FuaranUIRenderer
 
   final class ResolvedProjectionTests: XCTestCase {
-    /// Locate the shared corpus: `<repo>/Tests/FuaranUIRendererTests/…` →
-    /// `<repo>/../wire-format-fixtures`.
-    static func corpusNodesDir() -> URL? {
-      let here = URL(fileURLWithPath: #filePath)
-      let repoRoot =
-        here
-        .deletingLastPathComponent()  // FuaranUIRendererTests
-        .deletingLastPathComponent()  // Tests
-        .deletingLastPathComponent()  // fuaran-swift
-      let nodes =
-        repoRoot
-        .deletingLastPathComponent()
-        .appendingPathComponent("wire-format-fixtures")
-        .appendingPathComponent("nodes")
-      var isDir: ObjCBool = false
-      let exists = FileManager.default.fileExists(atPath: nodes.path, isDirectory: &isDir)
-      return exists && isDir.boolValue ? nodes : nil
-    }
+    /// The corpus's `nodes/` family through the shared locator (Phase 2331), or nil
+    /// where it stops (a cross-host checkout without the corpus records its failure).
+    static func corpusNodesDir() -> URL? { try? RendererCorpus.nodes() }
 
     func loadFixture(_ id: String) -> String? {
       guard let dir = Self.corpusNodesDir() else { return nil }

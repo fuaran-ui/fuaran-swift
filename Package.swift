@@ -70,9 +70,15 @@ targets.append(
 // and the reference macOS build renders for real.
 targets.append(
   .target(name: "FuaranUIRenderer", dependencies: ["FuaranUI"]))
+
+// Phase 2331: the ONE wire-corpus locator every test suite reads — the declared
+// `FUARAN_WIRE_FIXTURES` first, then the sibling and primary-worktree candidates.
+// Foundation only, and in no product.
+targets.append(.target(name: "FuaranWireCorpus"))
 targets.append(
   .testTarget(
-    name: "FuaranUIRendererTests", dependencies: ["FuaranUI", "FuaranUIRenderer"],
+    name: "FuaranUIRendererTests",
+    dependencies: ["FuaranUI", "FuaranUIRenderer", "FuaranWireCorpus"],
     swiftSettings: testSwiftSettings, linkerSettings: testLinkerSettings))
 
 // The server-driven (SDUI) driver (Phase 541): transport seam + URLSession
@@ -96,7 +102,7 @@ targets.append(
 
 targets.append(
   .testTarget(
-    name: "FuaranUITests", dependencies: ["FuaranUI", "FuaranUIIdlGen"],
+    name: "FuaranUITests", dependencies: ["FuaranUI", "FuaranUIIdlGen", "FuaranWireCorpus"],
     swiftSettings: testSwiftSettings, linkerSettings: testLinkerSettings))
 
 let package = Package(

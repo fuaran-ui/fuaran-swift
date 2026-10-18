@@ -35,38 +35,23 @@ import XCTest
 @testable import FuaranUIRenderer
 
 final class SparklineLoweringTests: XCTestCase {
-  /// `<repo>/Tests/FuaranUIRendererTests/…` → `<repo>/../wire-format-fixtures/sparkline-lowering`.
-  private static var familyDir: URL {
-    URL(fileURLWithPath: #filePath)
-      .deletingLastPathComponent()
-      .deletingLastPathComponent()
-      .deletingLastPathComponent()
-      .deletingLastPathComponent()
-      .appendingPathComponent("wire-format-fixtures")
-      .appendingPathComponent("sparkline-lowering")
-  }
-
-  /// The corpus, or the right kind of stop — the `RenderObligationTests` posture.
+  /// The family, or the right kind of stop — the `RenderObligationTests` posture.
   ///
   /// A missing family has two meanings and collapsing them into one clean skip is
-  /// a vacuous green: on a standalone clone the skip is honest; where the corpus
-  /// is plainly here and only this family is not, the gate would certify NOTHING
-  /// while reporting success.
+  /// a vacuous green: on a standalone clone the skip is honest (the shared locator
+  /// says which this is); where the corpus is plainly here and only this family is
+  /// not, the gate would certify NOTHING while reporting success.
   private func requireFamily() throws -> URL {
-    let dir = Self.familyDir
+    let corpus = try RendererCorpus.require()
+    let dir = corpus.appendingPathComponent("sparkline-lowering")
     var isDir: ObjCBool = false
-    if FileManager.default.fileExists(atPath: dir.path, isDirectory: &isDir), isDir.boolValue {
-      return dir
-    }
-    let corpus = dir.deletingLastPathComponent()
-    if FileManager.default.fileExists(atPath: corpus.path, isDirectory: &isDir), isDir.boolValue {
+    if !(FileManager.default.fileExists(atPath: dir.path, isDirectory: &isDir) && isDir.boolValue) {
       XCTFail(
         "the wire-format-fixtures corpus is present at \(corpus.path) but sparkline-lowering/ is "
           + "not — this gate certified NOTHING. If the family moved or was renamed, correct the "
           + "locator rather than letting the harness skip.")
-      return dir
     }
-    throw XCTSkip("wire-format-fixtures corpus not found — standalone checkout; skipping.")
+    return dir
   }
 
   /// The resolved series a vector's `.input.json` carries, read with the

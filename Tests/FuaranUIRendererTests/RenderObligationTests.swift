@@ -984,6 +984,9 @@ final class RenderObligationTests: XCTestCase {
   /// in the second case — the `CorpusTests` posture, applied to one file.
   private func requireManifest() throws -> RenderFidelityManifest {
     if RenderFidelityArtefact.isPresent { return try RenderFidelityArtefact.load() }
+    // No corpus at all: the locator's own stop (a skip on a standalone clone, a
+    // failure on a cross-host checkout, the declared variable's refusal).
+    _ = try RendererCorpus.require()
 
     let corpusDir = RenderFidelityArtefact.url.deletingLastPathComponent()
     var isDir: ObjCBool = false

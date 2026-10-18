@@ -26,23 +26,8 @@ final class DrawingLoweringTests: XCTestCase {
 
   // ── Corpus access ──────────────────────────────────────────────────────────
 
-  static func corpusDir() -> URL? {
-    let here = URL(fileURLWithPath: #filePath)
-    let repoRoot =
-      here
-      .deletingLastPathComponent()  // FuaranUIRendererTests
-      .deletingLastPathComponent()  // Tests
-      .deletingLastPathComponent()  // fuaran-swift
-    let corpus = repoRoot.deletingLastPathComponent().appendingPathComponent("wire-format-fixtures")
-    var isDir: ObjCBool = false
-    let exists = FileManager.default.fileExists(atPath: corpus.path, isDirectory: &isDir)
-    return exists && isDir.boolValue ? corpus : nil
-  }
-
   func drawing(_ relativePath: String) throws -> DrawingSpec {
-    guard let corpus = Self.corpusDir() else {
-      throw XCTSkip("wire-format-fixtures corpus not found — standalone checkout; skipping.")
-    }
+    let corpus = try RendererCorpus.require()
     let url = corpus.appendingPathComponent(relativePath)
     guard FileManager.default.fileExists(atPath: url.path) else {
       throw XCTSkip("corpus fixture \(relativePath) not present in this corpus revision.")
@@ -364,9 +349,7 @@ final class DrawingLoweringTests: XCTestCase {
   /// throw, and the tilt vocabulary must actually be present in what it reads —
   /// a green that came from an empty walk proves nothing.
   func testEveryChartLoweringGoldenComposesANameAndCarriesTilts() throws {
-    guard let corpus = Self.corpusDir() else {
-      throw XCTSkip("wire-format-fixtures corpus not found — skipping.")
-    }
+    let corpus = try RendererCorpus.require()
     let dir = corpus.appendingPathComponent("chart-lowering")
     guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else {
       throw XCTSkip("no chart-lowering family in this corpus revision.")

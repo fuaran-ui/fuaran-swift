@@ -19,6 +19,7 @@
 // adoption with its own bar.
 
 import Foundation
+import FuaranWireCorpus
 
 // ─── The artefact ─────────────────────────────────────────────────────────────
 
@@ -155,15 +156,12 @@ enum RenderFidelityArtefact {
     {
       return URL(fileURLWithPath: override)
     }
-    // `<repo>/Tests/FuaranUIRendererTests/…` → `<repo>/../wire-format-fixtures/…`
-    return
-      URL(fileURLWithPath: #filePath)
-      .deletingLastPathComponent()  // FuaranUIRendererTests
-      .deletingLastPathComponent()  // Tests
-      .deletingLastPathComponent()  // fuaran-swift
-      .deletingLastPathComponent()  // the workspace tree
-      .appendingPathComponent("wire-format-fixtures")
-      .appendingPathComponent("render-fidelity.json")
+    // The shared locator (Phase 2331): the declared corpus first, then the
+    // candidates. Where it finds none, the expected sibling path stands in, and
+    // `requireManifest` asks the locator for the right kind of stop.
+    var corpus = WireCorpus.expectedPath
+    if case .found(let located)? = try? WireCorpus.locate() { corpus = located }
+    return corpus.appendingPathComponent("render-fidelity.json")
   }
 
   static var isPresent: Bool { FileManager.default.fileExists(atPath: url.path) }

@@ -19,7 +19,10 @@ This repo sits alongside the other Fuaran reference-implementation tiers. Cross-
   2026-10-16).** This repository's own generator (`Sources/FuaranUIIdlGen`, Foundation only, in no
   product) reads the IDL — `FUARAN_WIRE_FIXTURES` first, then the corpus locator — and writes
   `Sources/FuaranUI/Model.generated.swift`: the bare-string enums, the tagged unions, the records,
-  one spec per kind, `NodeKind`, `NodeKindTag` and `NodeCategory`, recording the IDL's SHA-256. It
+  one spec per kind, `NodeKind`, `NodeKindTag` and `NodeCategory`, and one `<Union>Tag` per union
+  (Phase 2331), recording the IDL's SHA-256. Every field of a kind or a record is carried — the
+  generator refuses an entry that would drop one — and every union decoder switches over its
+  generated tag set with no `default`, so a case the IDL gains is a build error there. It
   applies uniform rules (in `Codegen.swift`'s header); every place this surface models a position
   differently is ONE entry in `Dialect.swift` with its reason, and the generator REFUSES an entry that
   names something the IDL no longer has or that the rules would now produce themselves. A host
@@ -57,6 +60,7 @@ fuaran-swift/
 ├── Sources/FuaranUIIdlGen/       # the generator: Idl.swift (reader), Codegen.swift (the rules),
 │                                 # Dialect.swift (every divergence, with its reason), ModelDocs.swift
 ├── Sources/fuaran-idl-gen/       # `swift run fuaran-idl-gen` — the generator as a command
+├── Sources/FuaranWireCorpus/     # the ONE corpus locator every test suite reads (FUARAN_WIRE_FIXTURES first)
 ├── Sources/FuaranUIRenderer/
 │   ├── MediaPlayback.swift       # the media playback projection (the six §3.6.6 obligations)
 │   ├── ImagePresentation.swift   # the image presentation projection (§3.6.2–§3.6.5)
@@ -108,7 +112,8 @@ fails to compile.
 
 ### Corpus render-coverage
 
-`Tests/FuaranUITests/CorpusTests.swift` locates `../wire-format-fixtures/` via `manifest.json` and
+`Tests/FuaranUITests/CorpusTests.swift` locates the corpus through `WireCorpus` (the declared
+`FUARAN_WIRE_FIXTURES` first, then `../wire-format-fixtures/`, identified by its marker files) and
 decodes every `node`-decoder fixture (node-round-trip + lenient-accept shorthand) into the sealed
 model; a decode throw is a hard failure (that is the "zero fallback-arm hits" bar). Coverage is
 reported per `NodeKind`. The harness skips cleanly when the corpus is absent (standalone checkout).

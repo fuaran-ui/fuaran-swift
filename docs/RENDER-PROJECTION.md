@@ -367,6 +367,27 @@ Every one of the kinds has an arm; what differs is how much each arm paints.
   for you.
 - **Descriptive only** — chart, map, mount, fragment reference.
 
+### Carried but not rendered
+
+Every field of every kind and record is in the model (the generator refuses a dialect
+entry that would drop one), so a document decodes to everything it says. What the
+floor does not yet paint is declared here rather than dropped:
+
+| Field | Why the floor does not act on it |
+|---|---|
+| `Chart.valueFormat`, `xTitle`, `yTitle`, `subtitle`, `legendPosition`, `dataLabels`, `xScale` | the chart arm is descriptive only; there is no plotted axis, legend or label to carry them |
+| `DataGrid.reorderable` | row reordering is an interactive host's gesture; the floor renders rows in source order |
+| `DataGrid.windowStateKey`, `rowTotal` | the grid window protocol needs a host that fetches row windows; the floor renders the rows it holds |
+| `ColumnErased.sortable`, `editable` | the floor neither sorts nor edits cells, so per-column narrowings have nothing to narrow |
+| `Modal.anchor` | the floor presents every modality in place; popover anchoring to another node is not drawn |
+| `FileUpload.onSelect`, `Stepper.onSelect`, `Mount.onBubble` | closure slots: presence-only, and the floor invokes no handler |
+
+Five closure slots inside a union case's payload are the one thing the model leaves
+out: `Action.ReadFileBody.onRead` and the `Editable`, `Checkbox`, `Button` and
+`Progress` cell handlers. Their wire form is the presence-only `"<closure>"` sentinel,
+and adding a member to a public enum case's payload is a source break, so each waits
+for a breaking release.
+
 ### The sparkline is LOWERED, not placeholdered
 
 `Sparkline` carries a bare bound series and nothing else, so every host that
@@ -657,10 +678,13 @@ Two environment variables are worth knowing:
   red, and demonstrating that must never involve writing to the shared corpus,
   which is the oracle every sibling surface answers to.
 
-The conformance legs place the corpus at `<repo>/../wire-format-fixtures`. When
-it is missing, the suite distinguishes two cases rather than skipping both: on a
-standalone clone a skip is honest, but in a cross-host checkout it would mean the
-gate silently certified nothing while reporting success — so that case **fails**.
+Every suite reads ONE corpus locator, `WireCorpus` (a Foundation-only target in no
+product): `FUARAN_WIRE_FIXTURES` first (refused, not ignored, when it names something
+that is not the corpus), then `<repo>/../wire-format-fixtures`, then the same path
+beside the primary checkout when this one is a git worktree. When it is missing, the
+suite distinguishes two cases rather than skipping both: on a standalone clone a skip
+is honest, but in a cross-host checkout it would mean the gate silently certified
+nothing while reporting success — so that case **fails**.
 
 CI is macOS-only, deliberately. Windows and Linux boxes have the Swift compiler
 and Foundation but not SwiftUI, so the renderer floor and the interaction driver

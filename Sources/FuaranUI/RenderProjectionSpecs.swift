@@ -38,7 +38,7 @@ extension Decode {
     return HeadingSpec(
       level: try reqInt(path, f, "level"),
       text: try reqTextSource(path, f, "text"),
-      variant: try headingVariant("\(path).variant", try req(path, f, "variant")))
+      variant: try f["variant"].map { try headingVariant("\(path).variant", $0) } ?? .standard)
   }
 
   static func labelValueRowSpec(_ path: String, _ j: JSON) throws -> LabelValueRowSpec {
@@ -95,7 +95,7 @@ extension Decode {
     let f = try object(path, j)
     return BadgeSpec(
       label: try reqTextSource(path, f, "label"),
-      variant: try badgeVariant("\(path).variant", try req(path, f, "variant")))
+      variant: try f["variant"].map { try badgeVariant("\(path).variant", $0) } ?? .neutral)
   }
 
   static func linkSpec(_ path: String, _ j: JSON) throws -> LinkSpec {
@@ -109,7 +109,7 @@ extension Decode {
     return LinkSpec(
       href: try reqBindingSlot(path, f, "href", .str),
       label: try reqTextSource(path, f, "label"),
-      download: try reqBool(path, f, "download"),
+      download: try optBool(path, f, "download") ?? false,
       rel: try optString(path, f, "rel"),
       target: try optString(path, f, "target"),
       protection: protection)
@@ -145,8 +145,8 @@ extension Decode {
     }
     let altV = try reqTextSource(path, f, "alt")
     let srcV = try reqBindingSlot(path, f, "src", .str)
-    let variantV: ImageVariant = try bareEnum(
-      "\(path).variant", try req(path, f, "variant"), "ImageVariant")
+    let variantV: ImageVariant =
+      try f["variant"].map { try bareEnum("\(path).variant", $0, "ImageVariant") } ?? .default
     // §3.6.2 — bare enums, so an unknown token reports at the FIELD's own
     // path with no `.$type` suffix (Phase 1073; `reject-unknown-image-aspect`
     // pins it). Absent decodes to the identity default, which is what makes a
@@ -341,7 +341,7 @@ extension Decode {
     let f = try object(path, j)
     let items = try array("\(path).items", try req(path, f, "items")).enumerated()
       .map { try textSource("\(path).items[\($0.0)]", $0.1) }
-    return ListSpec(items: items, ordered: try reqBool(path, f, "ordered"))
+    return ListSpec(items: items, ordered: try optBool(path, f, "ordered") ?? false)
   }
 
   static func toastSpec(_ path: String, _ j: JSON) throws -> ToastSpec {
@@ -361,12 +361,15 @@ extension Decode {
 
   static func codeBlockSpec(_ path: String, _ j: JSON) throws -> CodeBlockSpec {
     let f = try object(path, j)
-    let lines = try array("\(path).highlightLines", try req(path, f, "highlightLines")).enumerated()
-      .map { try int("\(path).highlightLines[\($0.0)]", $0.1) }
+    let lines =
+      try f["highlightLines"].map {
+        try array("\(path).highlightLines", $0).enumerated()
+          .map { try int("\(path).highlightLines[\($0.0)]", $0.1) }
+      } ?? []
     let codeV = try reqString(path, f, "code")
     let languageV = try reqString(path, f, "language")
-    let lineNumbersV = try reqBool(path, f, "lineNumbers")
-    let copyableV = try reqBool(path, f, "copyable")
+    let lineNumbersV = try optBool(path, f, "lineNumbers") ?? false
+    let copyableV = try optBool(path, f, "copyable") ?? true
     return CodeBlockSpec(
       code: codeV,
       copyable: copyableV,
@@ -885,7 +888,7 @@ extension Decode {
       id: id,
       kind: try formFieldKind(.formFieldId(id), "\(path).kind", try req(path, f, "kind")),
       label: try reqTextSource(path, f, "label"),
-      required: try reqBool(path, f, "required"),
+      required: try optBool(path, f, "required") ?? false,
       help: try optTextSource(path, f, "help"),
       rule: rule)
   }
@@ -918,7 +921,7 @@ extension Decode {
     return ButtonSpec(
       label: try reqTextSource(path, f, "label"),
       onClick: try reqAction(path, f, "onClick"),
-      variant: try buttonVariant("\(path).variant", try req(path, f, "variant")),
+      variant: try f["variant"].map { try buttonVariant("\(path).variant", $0) } ?? .secondary,
       icon: try optString(path, f, "icon"),
       disabled: try optBindingSlot(path, f, "disabled", .bool))
   }
@@ -930,10 +933,19 @@ extension Decode {
     let labelV = try reqTextSource(path, f, "label")
     // Field aliases: options / data → source.
     let sourceV = try reqBindingSlotAliased(path, f, "source", ["options", "data"], .options)
-    let valueV = try reqBindingSlot(path, f, "value", .stringOpt)
+    let multipleV = try optBool(path, f, "multiple") ?? false
+    // Phase 1962 (3.2) — a single-select carries `value`; a multi-select carries `values` and NO
+    // `value`. A single-select without it is refused (the IDL row reads optional because the
+    // relation is between two siblings); a `value` on a multi-select is read and dropped.
+    let valueV: Binding?
+    if multipleV {
+      if let v = f["value"] { _ = try bindingSlot("\(path).value", v, .stringOpt) }
+      valueV = nil
+    } else {
+      valueV = try reqBindingSlot(path, f, "value", .stringOpt)
+    }
     let placeholderV = try optTextSource(path, f, "placeholder")
     let disabledV = try optBindingSlot(path, f, "disabled", .bool)
-    let multipleV = (try optBool(path, f, "multiple")) == true
     return SelectSpec(
       label: labelV,
       onChange: optClosure(f, "onChange"),
@@ -970,7 +982,7 @@ extension Decode {
           + "that streams nowhere")
     }
     let labelV = try reqTextSource(path, f, "label")
-    let multipleV = try reqBool(path, f, "multiple")
+    let multipleV = try optBool(path, f, "multiple") ?? false
     let disabledV = try optBindingSlot(path, f, "disabled", .bool)
     // Phase 1115 — read through the STRICT bool reader: each slot decides
     // whether a whole ingress route exists, and a truthiness read would open
@@ -1475,7 +1487,7 @@ extension Decode {
     case .flex:
       return .flex(
         direction: try orientation("\(path).direction", try req(path, f, "direction")),
-        gap: try optInt(path, f, "gap"), wrap: try reqBool(path, f, "wrap"))
+        gap: try optInt(path, f, "gap"), wrap: try optBool(path, f, "wrap") ?? false)
     case .grid:
       // Field alias: columns → cols. Lenient (§3.6): absent `cols` with no
       // `templateColumns` reads as `Auto`; absent `cols` WITH a template reads
@@ -1549,7 +1561,7 @@ extension Decode {
       "\(path).orientation", try req(path, f, "orientation"))
     return BoxSpec(
       children: try children(path, f, walk), heading: nil,
-      layout: .flex(direction: direction, gap: nil, wrap: try reqBool(path, f, "wrap")),
+      layout: .flex(direction: direction, gap: nil, wrap: try optBool(path, f, "wrap") ?? false),
       role: .group, keepTogether: false, breakBefore: false)
   }
 
@@ -1625,7 +1637,9 @@ extension Decode {
   static func stepperSpec(_ path: String, _ j: JSON, _ walk: WireWalkState) throws -> StepperSpec {
     let f = try object(path, j)
     return StepperSpec(
-      activeStep: try reqBindingSlot(path, f, "activeStep", .int),
+      // Phase 2300 rule 1 — omitted at its declared default, `Static 0` (the Tabs.activeIndex shape).
+      activeStep: try f["activeStep"].map { try bindingSlot("\(path).activeStep", $0, .int) }
+        ?? .staticValue(.ast(.number(0))),
       children: try children(path, f, walk),
       onSelect: optClosure(f, "onSelect"))
   }
@@ -1659,7 +1673,7 @@ extension Decode {
     if let v = f["onDismiss"] { onDismiss = try action("\(path).onDismiss", v) }
     return ModalSpec(
       children: try children(path, f, walk),
-      dismissable: try reqBool(path, f, "dismissable"),
+      dismissable: try optBool(path, f, "dismissable") ?? true,
       onDismiss: onDismiss,
       open: try reqBindingSlot(path, f, "open", .bool),
       // Field alias: title → heading.

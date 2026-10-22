@@ -1406,7 +1406,7 @@
     let ctx: BindingContext
     var body: some View {
       let display: String = {
-        let v = ctx.resolve(k.value)
+        let v = k.value.map { ctx.resolve($0) } ?? ""
         if !v.isEmpty { return v }
         return k.placeholder.map { ctx.resolveText($0) } ?? ""
       }()

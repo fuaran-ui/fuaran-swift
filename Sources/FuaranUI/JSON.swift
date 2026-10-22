@@ -361,7 +361,51 @@ private struct JSONParser {
     let text = String(String.UnicodeScalarView(scalars[start..<i]))
     guard Self.isJSONNumber(text) else { throw err("invalid number '\(text)'") }
     guard let d = Double(text) else { throw err("invalid number '\(text)'") }
+    try Self.checkNumberValue(text, d, err)
     return d
+  }
+
+  /// The two VALUE rules a well-formed number token must still meet (Phase 2286,
+  /// the amended WIRE_FORMAT §20.2 row 7 and §2 rule 5), both `INVALID_JSON`. A
+  /// value outside the finite `Double` range (`1e999`) is refused: the wire has
+  /// no non-finite float. An integer token past 2^53 is read only when it is the
+  /// canonical float layout of the double it reads as (`10000000000000000` is;
+  /// `9007199254740993`, which reads as 2^53, is not). The second is judged on
+  /// the TOKEN, because 2^53 + 1 reads as 2^53 and a range check on the value
+  /// would admit it.
+  static func checkNumberValue(
+    _ text: String, _ d: Double, _ err: (String) -> FuaranDecodeError
+  ) throws {
+    guard d.isFinite else {
+      throw err("number '\(text)' is outside the finite double range; it cannot round-trip on the wire")
+    }
+    guard !text.contains(where: { $0 == "." || $0 == "e" || $0 == "E" }) else { return }
+    let digits = text.hasPrefix("-") ? String(text.dropFirst()) : text
+    let safe = digits.count < 16 || (digits.count == 16 && digits <= "9007199254740992")
+    if !safe && canonicalIntegerLayout(d) != text {
+      throw err(
+        "integer literal '\(text)' is outside the int53 safe range (|n| > 2^53); "
+          + "it cannot round-trip without precision loss")
+    }
+  }
+
+  /// The canonical float layout (WIRE_FORMAT §2 rule 5) of `d` written in fixed
+  /// point with no fraction — a base-10 exponent of 15 or 16, the only layouts an
+  /// integer token past 2^53 can match — else nil. The digits are the shortest
+  /// that round-trip, which is what `Double.description` writes.
+  static func canonicalIntegerLayout(_ d: Double) -> String? {
+    let parts = abs(d).description.lowercased().split(separator: "e", maxSplits: 1)
+    let mantissa = parts[0].split(separator: ".", maxSplits: 1)
+    let whole = String(mantissa[0])
+    let frac = mantissa.count > 1 ? String(mantissa[1]) : ""
+    guard let shift = parts.count > 1 ? Int(parts[1].replacingOccurrences(of: "+", with: "")) : 0
+    else { return nil }
+    let exponent = whole.count - 1 + shift
+    guard (15...16).contains(exponent) else { return nil }
+    var all = whole + frac
+    while all.count > 1 && all.hasSuffix("0") { all.removeLast() }
+    guard all.count <= exponent + 1 else { return nil }
+    return (d < 0 ? "-" : "") + all + String(repeating: "0", count: exponent + 1 - all.count)
   }
 
   static func isJSONNumber(_ text: String) -> Bool {

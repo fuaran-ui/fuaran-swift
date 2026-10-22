@@ -25,6 +25,22 @@ public enum ColumnType: String, CaseIterable, Equatable, Sendable {
   case string = "string"
   case date = "date"
   case timestamp = "timestamp"
+  // Phase 2206 (WIRE_FORMAT 3.6.25) — the sub-second units, after `timestamp` so
+  // the enumerated list keeps its earlier prefix in its earlier order.
+  case timestampMs = "timestamp_ms"
+  case timestampUs = "timestamp_us"
+  case timestampNs = "timestamp_ns"
+
+  /// The fraction digits a timestamp column's unit holds, or nil for a non-timestamp type.
+  public var timestampDigits: Int? {
+    switch self {
+    case .int, .float, .bool, .string, .date: return nil
+    case .timestamp: return 0
+    case .timestampMs: return 3
+    case .timestampUs: return 6
+    case .timestampNs: return 9
+    }
+  }
 }
 
 public enum BinOp: String, CaseIterable, Equatable, Sendable {

@@ -291,17 +291,102 @@ extension Decode {
     case (.bool, .bool(let b)): return .bool(b)
     case (.string, .string(let s)): return .str(s)
     case (.date, .string(let s)): return .date(s)
-    case (.timestamp, .string(let s)): return .timestamp(s)
-    // Lenient-ingest (Core Phase 94): a declared-timestamp column accepts an
-    // epoch NUMBER — unit by magnitude (>= 1e11 => milliseconds) — normalised
-    // to the canonical ISO string on decode.
-    case (.timestamp, .number(let n))
-    where n == n.rounded(.towardZero) && abs(n) < 9e15:
-      let i = Int64(n)
-      let secs = abs(i) >= 100_000_000_000 ? i / 1000 : i
-      return .timestamp(isoOfEpochSeconds(secs))
+    case (.timestamp, _), (.timestampMs, _), (.timestampUs, _), (.timestampNs, _):
+      return .timestamp(try readInstant(path, ty, ty.timestampDigits ?? 0, v))
     default: throw wrongType(path, "\(ty.rawValue) cell value")
     }
+  }
+
+  /// The epoch seconds the canonical instant text spells: 0000-01-01T00:00:00Z
+  /// and 9999-12-31T23:59:59Z.
+  static let minEpochSecond: Int64 = -62_167_219_200
+  static let maxEpochSecond: Int64 = 253_402_300_799
+
+  /// WIRE_FORMAT 3.6.25 (Phase 2206) — one present value of a timestamp column,
+  /// in any unit, as its canonical instant text. TEXT is read only in canonical
+  /// form, with a fraction no finer than the unit (a coarser instant widens in
+  /// unchanged: one instant has one text). An EPOCH NUMBER (whole-valued,
+  /// |x| < 9e15) is read in a `timestamp` column by magnitude (Core Phase 94:
+  /// >= 1e11 is milliseconds, truncated toward zero to the second), and in a
+  /// sub-second column as a count in its own unit; either way it must name an
+  /// instant in the years 0000-9999.
+  static func readInstant(_ path: String, _ ty: ColumnType, _ digits: Int, _ v: JSON) throws -> String {
+    switch v {
+    case .string(let s):
+      let n = canonicalFractionDigits(s)
+      guard n >= 0 else {
+        throw wrongType(
+          path,
+          "\(ty.rawValue) value in canonical ISO-8601 text, YYYY-MM-DDThh:mm:ssZ or "
+            + "YYYY-MM-DDThh:mm:ss.FZ, naming a moment that exists")
+      }
+      guard n <= digits else {
+        let needed = ColumnType.allCases.first { ($0.timestampDigits ?? -1) >= n }!
+        throw wrongType(
+          path,
+          "\(ty.rawValue) value no finer than the column's unit — its fraction needs "
+            + "\(needed.rawValue) or finer")
+      }
+      return s
+    case .number(let x) where x == x.rounded(.towardZero) && abs(x) < 9e15:
+      let i = Int64(x)
+      var second = i
+      var fraction: Int64 = 0
+      var scale: Int64 = 1
+      if digits == 0 {
+        if abs(i) >= 100_000_000_000 { second = i / 1000 }
+      } else {
+        for _ in 0..<digits { scale *= 10 }
+        second = i / scale
+        if i % scale < 0 { second -= 1 }
+        fraction = i - second * scale
+      }
+      guard second >= minEpochSecond && second <= maxEpochSecond else {
+        throw wrongType(
+          path,
+          "\(ty.rawValue) epoch naming an instant inside the years 0000-9999 — \(i) does not")
+      }
+      let text = isoOfEpochSeconds(second)
+      guard fraction != 0 else { return text }
+      var frac = String(fraction)
+      frac = String(repeating: "0", count: digits - frac.count) + frac
+      while frac.hasSuffix("0") { frac.removeLast() }
+      return String(text.dropLast()) + "." + frac + "Z"
+    default:
+      throw wrongType(path, "\(ty.rawValue) cell value")
+    }
+  }
+
+  /// The fraction digits of CANONICAL instant text (`YYYY-MM-DDThh:mm:ssZ`, or
+  /// `YYYY-MM-DDThh:mm:ss.FZ` with one to nine digits and no trailing zero,
+  /// naming a moment that exists), or -1 for any other text.
+  static func canonicalFractionDigits(_ text: String) -> Int {
+    let s = Array(text.utf8)
+    func at(_ k: Int, _ c: Character) -> Bool { s[k] == c.asciiValue! }
+    guard s.count >= 20, at(4, "-"), at(7, "-"), at(10, "T"), at(13, ":"), at(16, ":") else {
+      return -1
+    }
+    func num(_ from: Int, _ n: Int) -> Int {
+      var acc = 0
+      for k in from..<(from + n) {
+        guard s[k] >= 48 && s[k] <= 57 else { return -1 }
+        acc = acc * 10 + Int(s[k] - 48)
+      }
+      return acc
+    }
+    let (y, mo, d) = (num(0, 4), num(5, 2), num(8, 2))
+    let (h, mi, se) = (num(11, 2), num(14, 2), num(17, 2))
+    guard y >= 0, (1...12).contains(mo), (0...23).contains(h), (0...59).contains(mi),
+      (0...59).contains(se)
+    else { return -1 }
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)
+    let days = mo == 2 ? (leap ? 29 : 28) : ([4, 6, 9, 11].contains(mo) ? 30 : 31)
+    guard d >= 1 && d <= days else { return -1 }
+    if s.count == 20 { return at(19, "Z") ? 0 : -1 }
+    guard s.count <= 30, at(19, "."), at(s.count - 1, "Z"), !at(s.count - 2, "0"),
+      num(20, s.count - 21) >= 0
+    else { return -1 }
+    return s.count - 21
   }
 
   /// Render an epoch-seconds instant as the canonical ISO-8601 UTC timestamp

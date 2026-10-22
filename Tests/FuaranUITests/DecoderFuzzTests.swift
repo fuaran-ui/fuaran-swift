@@ -1215,34 +1215,60 @@ final class DecoderFuzzTests: XCTestCase {
 
   /// The FIRST defect this leg found, now a regression test on the fix: a JSON
   /// number that `Int` cannot represent — non-finite, or outside its range — is
-  /// refused by TYPE on the slot that asked for an integer, where `Int(Double)`
-  /// used to trap and end the process. Finite values keep the reference host's
-  /// truncation, so the accepted side of the contract did not move.
+  /// refused rather than trapping in `Int(Double)` and ending the process. A
+  /// finite value outside the range is refused by TYPE on the slot that asked for
+  /// an integer. Since Phase 2286 (the amended WIRE_FORMAT §20.2 row 7) an
+  /// overflowing exponent never reaches a slot: the parse refuses it as
+  /// `INVALID_JSON` at the root, because the wire has no non-finite float.
+  /// Phase 2286 — §20.2 row 7 and §2 rule 5, both amended: an overflowing exponent,
+  /// and an integer token past 2^53 that is not the canonical float layout of its
+  /// double, are `INVALID_JSON`; the canonical layouts past 2^53 still read.
+  func testRow7AndRule5NumberTokens() throws {
+    func payload(_ lit: String) -> String {
+      #"{"id":"c","kind":{"$type":"Custom","componentId":"c","moduleId":"m","props":{"n":"#
+        + lit + "}}}"
+    }
+    for lit in [
+      "1e999", "-1e999", "9007199254740993", "-9007199254740993", "12345678901234567890",
+      "100000000000000000", "36028797018963968",
+    ] {
+      XCTAssertThrowsError(try RenderProjection.decodeNode(payload(lit)), lit) { e in
+        XCTAssertEqual((e as? FuaranDecodeError)?.code, .invalidJson, lit)
+      }
+    }
+    for lit in [
+      "1e-999", "9007199254740991", "9007199254740992", "9007199254740994", "10000000000000000",
+      "36028797018963970",
+    ] {
+      XCTAssertNoThrow(try RenderProjection.decodeNode(payload(lit)), lit)
+    }
+  }
+
   func testNonFiniteAndOutOfRangeIntegerSlotsAreRefusedByType() throws {
-    let refused: [(String, String, String)] = [
+    let refused: [(String, FuaranDecodeError.Code, String, String)] = [
       (
         #"{"id":"a","kind":{"$type":"Heading","level":1e999,"text":"x","variant":"Standard"}}"#,
-        "$.kind.level", "infinite"
+        .invalidJson, "$", "infinite"
       ),
       (
         #"{"id":"a","kind":{"$type":"Heading","level":-1e999,"text":"x","variant":"Standard"}}"#,
-        "$.kind.level", "negative infinite"
+        .invalidJson, "$", "negative infinite"
       ),
       (
         #"{"id":"a","kind":{"$type":"Heading","level":1e30,"text":"x","variant":"Standard"}}"#,
-        "$.kind.level", "finite but greater than Int.max"
+        .wrongType, "$.kind.level", "finite but greater than Int.max"
       ),
       (
         #"{"id":"a","kind":{"$type":"Skeleton","rows":1e999}}"#,
-        "$.kind.rows", "a different spec, the same root cause — every int slot is affected"
+        .invalidJson, "$", "a different spec, the same root cause — every int slot is affected"
       ),
     ]
-    for (input, path, why) in refused {
+    for (input, code, path, why) in refused {
       do {
         _ = try RenderProjection.decodeNode(input)
         XCTFail("ACCEPTED an integer slot Int cannot hold (\(why)): \(input)")
       } catch let e as FuaranDecodeError {
-        XCTAssertEqual(e.code, .wrongType, "\(why): wrong code — \(e)")
+        XCTAssertEqual(e.code, code, "\(why): wrong code — \(e)")
         XCTAssertEqual(e.path, path, "\(why): the refusal names the slot — \(e)")
       } catch {
         XCTFail("\(why): threw an untyped error \(error)")

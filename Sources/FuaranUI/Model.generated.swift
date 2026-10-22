@@ -4,7 +4,7 @@
 // GENERATED from the wire corpus's `idl.json` by `Sources/FuaranUIIdlGen` — do not edit.
 // The rules, and the dialect this surface keeps over them, are in that directory.
 //
-//   idl.json sha256: 857888fc68ecc881b6a11e7f141e32f04ba07fd5d21d6ff47ed16538bad2d2d2
+//   idl.json sha256: e9ff0a22d727111d3d847a689655149081bdd1203f66ea2417905e13cd1791c7
 //
 // Regenerate with
 //   FUARAN_IDL_REGENERATE=1 swift test --filter GeneratedModelTests
@@ -16,7 +16,7 @@ import Foundation
 /// The IDL this model was generated from.
 enum GeneratedModel {
   /// The SHA-256 of the `idl.json` bytes.
-  static let idlSha256 = "857888fc68ecc881b6a11e7f141e32f04ba07fd5d21d6ff47ed16538bad2d2d2"
+  static let idlSha256 = "e9ff0a22d727111d3d847a689655149081bdd1203f66ea2417905e13cd1791c7"
 }
 
 // ── Bare-string enums: the `rawValue` is the wire spelling ───────────────────
@@ -1164,7 +1164,7 @@ public struct FormField: Equatable, Sendable {
   public var id: String
   public var kind: FormFieldKind
   public var label: TextSource
-  public var required: Bool
+  public var required: Bool = false
   public var help: TextSource?
   public var rule: FieldRule?
 }
@@ -1344,7 +1344,7 @@ public struct ViewBox: Equatable, Sendable {
 
 public struct BadgeSpec: Equatable, Sendable {
   public var label: TextSource
-  public var variant: BadgeVariant
+  public var variant: BadgeVariant = .neutral
 }
 
 public struct BoxSpec: Equatable, Sendable {
@@ -1362,7 +1362,7 @@ public struct BoxSpec: Equatable, Sendable {
 public struct ButtonSpec: Equatable, Sendable {
   public var label: TextSource
   public var onClick: Action
-  public var variant: ButtonVariant
+  public var variant: ButtonVariant = .secondary
   public var icon: String?
   public var disabled: Binding?
 }
@@ -1396,10 +1396,10 @@ public struct ChartSpec: Equatable, Sendable {
 
 public struct CodeBlockSpec: Equatable, Sendable {
   public var code: String
-  public var copyable: Bool
-  public var highlightLines: [Int]
+  public var copyable: Bool = true
+  public var highlightLines: [Int] = []
   public var language: String
-  public var lineNumbers: Bool
+  public var lineNumbers: Bool = false
 }
 
 public struct CustomSpec: Equatable, Sendable {
@@ -1542,7 +1542,7 @@ public struct FactSpec: Equatable, Sendable {
 public struct FileUploadSpec: Equatable, Sendable {
   public var accept: [String]
   public var label: TextSource
-  public var multiple: Bool
+  public var multiple: Bool = false
   public var onSelect: Closure?
   public var disabled: Binding?
   public var acceptPaste: Bool = false
@@ -1610,7 +1610,7 @@ public struct FragmentRefSpec: Equatable, Sendable {
 public struct HeadingSpec: Equatable, Sendable {
   public var level: Int
   public var text: TextSource
-  public var variant: HeadingVariant
+  public var variant: HeadingVariant = .standard
 }
 
 /// A standalone glyph. `icon` is a NAME; the embedding app owns the name -> glyph
@@ -1626,7 +1626,7 @@ public struct IconSpec: Equatable, Sendable {
 public struct ImageSpec: Equatable, Sendable {
   public var alt: TextSource
   public var src: Binding
-  public var variant: ImageVariant
+  public var variant: ImageVariant = .default
   /// §3.6.2 — the three presentation slots, each omitted on the wire at its
   /// identity default. TOTAL, not `Optional`: "absent means `Natural`" is a
   /// DEFAULT rather than a third state, so modelling absence as `nil` would
@@ -1672,7 +1672,7 @@ public struct LabelValueRowSpec: Equatable, Sendable {
 public struct LinkSpec: Equatable, Sendable {
   public var href: Binding
   public var label: TextSource
-  public var download: Bool
+  public var download: Bool = false
   public var rel: String?
   public var target: String?
   /// Omitted on the wire when `nil`.
@@ -1681,7 +1681,7 @@ public struct LinkSpec: Equatable, Sendable {
 
 public struct ListSpec: Equatable, Sendable {
   public var items: [TextSource]
-  public var ordered: Bool
+  public var ordered: Bool = false
 }
 
 public struct MapSpec: Equatable, Sendable {
@@ -1780,7 +1780,7 @@ public struct MetricSpec: Equatable, Sendable {
 
 public struct ModalSpec: Equatable, Sendable {
   public var children: [Node]
-  public var dismissable: Bool
+  public var dismissable: Bool = true
   public var onDismiss: Action?
   public var `open`: Binding
   public var heading: TextSource?
@@ -1821,7 +1821,7 @@ public struct SelectSpec: Equatable, Sendable {
   public var onChange: Closure?
   public var onChangeMulti: Closure?
   public var source: Binding
-  public var value: Binding
+  public var value: Binding?
   public var placeholder: TextSource?
   public var disabled: Binding?
   public var multiple: Bool
